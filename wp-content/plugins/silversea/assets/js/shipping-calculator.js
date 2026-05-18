@@ -1,0 +1,901 @@
+/* shipping-calculator.js  v1.4.0 */
+(function () {
+  "use strict";
+
+  /* ── COOKIE helpers ── */
+  var SC_COOKIE = 'sc_prefs';
+  var SC_COOKIE_DAYS = 365;
+
+  function scCookieSave(data) {
+    var exp = new Date();
+    exp.setDate(exp.getDate() + SC_COOKIE_DAYS);
+    document.cookie = SC_COOKIE + '=' + encodeURIComponent(JSON.stringify(data))
+      + ';expires=' + exp.toUTCString() + ';path=/;SameSite=Lax';
+  }
+
+  function scCookieLoad() {
+    var match = document.cookie.match('(?:^|; )' + SC_COOKIE + '=([^;]*)');
+    if (!match) return null;
+    try { return JSON.parse(decodeURIComponent(match[1])); } catch(e) { return null; }
+  }
+
+  function scSavePrefs() {
+    var methodEl  = document.querySelector('.sc-toggle-btn.active');
+    var method    = methodEl ? methodEl.dataset.method : currentMethod;
+    var pickupEl  = document.getElementById('scPickupCity');
+    var originEl  = document.getElementById('scOriginCity');
+    var postalEl  = document.getElementById('scPostalCode');
+    scCookieSave({
+      method:    method,
+      pickup:    pickupEl  ? pickupEl.value  : '',
+      origin:    originEl  ? originEl.value  : '',
+      postal:    postalEl  ? postalEl.value  : '',
+      transport: currentTransport,
+    });
+  }
+
+  function scRestorePrefs() {
+    var p = scCookieLoad();
+    if (!p) return;
+    /* method */
+    if (p.method) {
+      currentMethod = p.method;
+      document.querySelectorAll('.sc-toggle-btn').forEach(function(b) {
+        b.classList.toggle('active', b.dataset.method === p.method);
+      });
+      var pickup   = document.getElementById('scPickupPanel');
+      var delivery = document.getElementById('scDeliveryPanel');
+      if (pickup)   pickup.classList.toggle('sc-hidden',   p.method !== 'pickup');
+      if (delivery) delivery.classList.toggle('sc-hidden', p.method !== 'delivery');
+    }
+    /* pickup city */
+    if (p.pickup) {
+      var pickupEl = document.getElementById('scPickupCity');
+      if (pickupEl) { pickupEl.value = p.pickup; scPickupCityChanged(); }
+    }
+    /* origin */
+    if (p.origin) {
+      var originEl = document.getElementById('scOriginCity');
+      if (originEl) { originEl.value = p.origin; scShowDeposito(p.origin, 'scDepositoInfoDelivery'); }
+    }
+    /* postal */
+    if (p.postal) {
+      var postalEl = document.getElementById('scPostalCode');
+      if (postalEl) postalEl.value = p.postal;
+    }
+    /* transport */
+    if (p.transport) {
+      currentTransport = p.transport;
+      document.querySelectorAll('[data-transport]').forEach(function(b) {
+        b.classList.toggle('active', b.dataset.transport === p.transport);
+      });
+    }
+    /* suggest transport tip if both origin + postal filled */
+    if (p.origin && p.postal) scSuggestTransport();
+
+    /* No auto-calcular al restaurar: solo pre-llenar los campos.
+       El usuario verá sus preferencias previas listas pero sin mostrar
+       "Cotización guardada" en productos que nunca cotizó. */
+  }
+
+  var productSize = typeof silvSea !== "undefined" && silvSea.productSize ? silvSea.productSize : "20";
+  var demoMode = typeof silvSea !== "undefined" && silvSea.demoMode === "1";
+  var descargaModo = typeof silvSea !== "undefined" && silvSea.descargaModo ? silvSea.descargaModo : "contenedor";
+  var demoPriceSin = typeof silvSea !== "undefined" ? (parseFloat(silvSea.demoPriceSin) || 786.60) : 786.60;
+  var demoPriceC20 = typeof silvSea !== "undefined" ? (parseFloat(silvSea.demoPriceC20) || 1644.00) : 1644.00;
+  var demoPriceC40 = typeof silvSea !== "undefined" ? (parseFloat(silvSea.demoPriceC40) || 1765.28) : 1765.28;
+  var isConsolidated = typeof silvSea !== "undefined" && silvSea.mode === "consolidated";
+  var showFront = typeof silvSea !== "undefined" && silvSea.showFront === "1";
+  var cartItems = typeof silvSea !== "undefined" && silvSea.items ? silvSea.items : [];
+
+  var currentMethod = "pickup";
+  var currentTransport = "sin";
+  var currentQty = 1;
+
+  /*  CANTIDAD  */
+  window.scQty = function (delta) { currentQty = Math.max(1, currentQty + delta); scSyncQty(); scClearResult(); };
+
+  function scSyncQty() {
+    document.getElementById("scQtyVal").textContent = currentQty;
+    var native = document.querySelector('input[name="quantity"]');
+    if (native && parseInt(native.value) !== currentQty) { native.value = currentQty; native.dispatchEvent(new Event("change", { bubbles: true })); }
+  }
+
+  function scGetQty() { return currentQty; }
+
+  document.addEventListener("DOMContentLoaded", function () {
+    /* Restaurar preferencias guardadas en cookie */
+    scRestorePrefs();
+
+    /* Auto-recalcular si venimos de "Actualizar lista" */
+    if (window.location.search.indexOf('sc_recalc=1') !== -1) {
+      /* Limpiar el parámetro de la URL sin recargar */
+      var cleanUrl = window.location.href
+        .replace(/([?&])sc_recalc=1(&?)/, function(_, pre, post) { return post ? pre : ''; })
+        .replace(/\?$/, '');
+      window.history.replaceState({}, '', cleanUrl);
+      /* Disparar cálculo si hay método delivery con datos suficientes */
+      if (currentMethod === 'delivery') {
+        setTimeout(function() { scCalculate(); }, 150);
+      }
+    }
+
+    var native = document.querySelector('input[name="quantity"]');
+    if (!native) return;
+    function syncFromNative() { var val = Math.max(1, parseInt(this.value) || 1); if (val !== currentQty) { currentQty = val; document.getElementById("scQtyVal").textContent = currentQty; scClearResult(); } }
+    native.addEventListener("change", syncFromNative);
+    native.addEventListener("input", syncFromNative);
+  });
+
+  /*  MÉTODO  */
+  window.scSetMethod = function (m) {
+    currentMethod = m;
+    document.querySelectorAll(".sc-toggle-btn").forEach(function (b) { b.classList.toggle("active", b.dataset.method === m); });
+    document.getElementById("scPickupPanel").classList.toggle("sc-hidden", m !== "pickup");
+    document.getElementById("scDeliveryPanel").classList.toggle("sc-hidden", m !== "delivery");
+    scClearResult();
+    scSavePrefs();
+  };
+
+  /*  RETIRO  */
+  window.scPickupCityChanged = function () {
+    var city = document.getElementById("scPickupCity").value;
+    var info = document.getElementById("scPickupInfo"); var contBtn = document.getElementById("scContinueBtn");
+    if (city) { info.classList.remove("sc-hidden"); contBtn.classList.remove("sc-hidden"); }
+    else { info.classList.add("sc-hidden"); contBtn.classList.add("sc-hidden"); }
+    scShowDeposito(city, "scDepositoInfo");
+    scSavePrefs();
+  };
+
+  window.scContinue = function () {
+    var city = document.getElementById("scPickupCity").value; if (!city) return;
+    var sd = new FormData();
+    sd.append("action", "silversea_save_shipping");
+    sd.append("nonce", typeof silvSea !== "undefined" ? silvSea.nonce : "");
+    sd.append("method", "pickup"); sd.append("pickup_city", city); sd.append("price", 0);
+    fetch(typeof silvSea !== "undefined" ? silvSea.ajaxUrl : "/wp-admin/admin-ajax.php", { method: "POST", body: sd });
+    /* Sincronizar hidden fields del form de cotización */
+    scSyncFormFields({ method: "pickup", origin: "", cp: "", transport: "", price: 0, pickup: city });
+    var btn = document.getElementById("scContinueBtn");
+    btn.textContent = "\u2713 Retiro guardado"; btn.disabled = true; btn.style.background = "#1D9E75";
+  };
+
+  /*  ENTREGA  */
+  window.scSetTransport = function (t) {
+    currentTransport = t;
+    document.querySelectorAll("[data-transport]").forEach(function (b) { b.classList.toggle("active", b.dataset.transport === t); });
+    scClearResult();
+    scSavePrefs();
+  };
+
+  window.scSuggestTransport = function () {
+    var origin = document.getElementById("scOriginCity").value;
+    var postal = document.getElementById("scPostalCode").value;
+    var tip = document.getElementById("scTransportTip"); var tipText = document.getElementById("scTransportTipText");
+    scShowDeposito(origin, "scDepositoInfoDelivery");
+    scSavePrefs();
+    if (origin && postal.length >= 4) {
+      tip.classList.remove("sc-hidden");
+      tipText.innerHTML = "Recomendamos <strong>sin descarga</strong> si dispon\u00e9s de medios propios en destino (precio menor). Eleg\u00ed <strong>con descarga</strong> si necesit\u00e1s que el cami\u00f3n incluya gr\u00faa.";
+    } else tip.classList.add("sc-hidden");
+    scClearResult();
+  };
+
+  /*  HELPERS  */
+  function scClearResult() {
+    document.getElementById("scResultArea").classList.add("sc-hidden");
+    document.getElementById("scErrorArea").classList.add("sc-hidden");
+  }
+
+  function scShowError(msg) {
+    var el = document.getElementById("scErrorArea"); el.textContent = msg; el.classList.remove("sc-hidden");
+    document.getElementById("scResultArea").classList.add("sc-hidden");
+    document.getElementById("scLoaderArea").classList.add("sc-hidden");
+    document.getElementById("scCalcBtn").disabled = false;
+  }
+
+  function scShowResult(data) {
+    document.getElementById("scLoaderArea").classList.add("sc-hidden");
+    document.getElementById("scErrorArea").classList.add("sc-hidden");
+    document.getElementById("scCalcBtn").disabled = false;
+    var area = document.getElementById("scResultArea");
+    var priceEl = document.getElementById("scResultPrice");
+    var detailEl = document.getElementById("scResultDetail");
+    var breakEl = document.getElementById("scResultBreakdown");
+    var daysEl = document.getElementById("scResultDays");
+
+    if (showFront) {
+      area.classList.remove("sc-hidden");
+      setTimeout(function () { area.scrollIntoView({ behavior: "smooth", block: "nearest" }); }, 50);
+      priceEl.className = "sc-result-price";
+      var num = parseFloat(data.price);
+      priceEl.textContent = "€ " + num.toLocaleString("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      detailEl.textContent = data.detail || "";
+      if (data.breakdown && data.breakdown.length > 0) {
+        var lines = data.breakdown.map(function (b) { return b.label + ": € " + parseFloat(b.price).toLocaleString("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 2 }); });
+        breakEl.innerHTML = "<strong>Desglose:</strong><br>" + lines.join("<br>");
+        breakEl.classList.remove("sc-hidden");
+      } else breakEl.classList.add("sc-hidden");
+      if (data.days) {
+        daysEl.textContent = "Plazo estimado: " + data.days + " días hábiles"; daysEl.classList.remove("sc-hidden");
+      } else daysEl.classList.add("sc-hidden");
+    } else {
+      /* showFront desactivado — mostrar confirmación neutral sin precio */
+      area.classList.remove("sc-hidden");
+      priceEl.className = "sc-result-free";
+      priceEl.textContent = "✓ Cotización guardada";
+      detailEl.textContent = "Recibirás el detalle por email.";
+      breakEl.classList.add("sc-hidden");
+      daysEl.classList.add("sc-hidden");
+    }
+    if (currentMethod === "delivery" && data.price > 0) {
+      var sd = new FormData();
+      sd.append("action", "silversea_save_shipping");
+      sd.append("nonce", typeof silvSea !== "undefined" ? silvSea.nonce : "");
+      sd.append("method", "delivery");
+      sd.append("origin", document.getElementById("scOriginCity").value);
+      sd.append("postal_code", document.getElementById("scPostalCode").value);
+      sd.append("transport", currentTransport);
+      sd.append("price", data.price); sd.append("detail", data.detail || "");
+      sd.append("trucks", data.trucks || 1); sd.append("days", data.days || 5);
+      fetch(typeof silvSea !== "undefined" ? silvSea.ajaxUrl : "/wp-admin/admin-ajax.php", { method: "POST", body: sd });
+      /* Sincronizar hidden fields del form de cotización */
+      scSyncFormFields({ method: "delivery", origin: document.getElementById("scOriginCity").value, cp: document.getElementById("scPostalCode").value, transport: currentTransport, price: data.price, pickup: "" });
+    }
+  }
+
+  /*  SYNC con form de cotización — popula hidden fields y dispara evento  */
+  window.scSyncFormFields = function (d) {
+    function setVal(id, val) {
+      var el = document.getElementById(id); if (el) el.value = val || "";
+    }
+    setVal("rqa-shipping-method",    d.method);
+    setVal("rqa-shipping-origin",    d.origin);
+    setVal("rqa-shipping-cp",        d.cp);
+    setVal("rqa-shipping-transport", d.transport);
+    setVal("rqa-shipping-price",     d.price);
+    setVal("rqa-shipping-pickup",    d.pickup);
+    document.dispatchEvent(new CustomEvent("silversea:shipping:saved", { detail: d }));
+  };
+
+  /*  LÓGICA DE CAMIONES  */
+  function scBuildTruckList(qty, size) {
+    var trucks = []; var remaining = [];
+    for (var i = 0; i < qty; i++) {
+      if (size === 40) trucks.push({ containers: [{ size: 40, qty: 1 }], units: 4 });
+      else remaining.push({ size: size, units: size / 10 });
+    }
+    var current = []; var currentUnits = 0;
+    remaining.forEach(function (c) {
+      if (currentUnits + c.units <= 4) { current.push(c); currentUnits += c.units; }
+      else { if (current.length > 0) trucks.push({ containers: scConsolidateTruck(current), units: currentUnits }); current = [c]; currentUnits = c.units; }
+    });
+    if (current.length > 0) trucks.push({ containers: scConsolidateTruck(current), units: currentUnits });
+    return trucks;
+  }
+
+  function scConsolidateTruck(containers) {
+    var map = {};
+    containers.forEach(function (c) { var key = c.size; if (map[key]) map[key].qty++; else map[key] = { size: c.size, qty: 1 }; });
+    return Object.values(map);
+  }
+
+  /*  BUILD RESULT — SINGLE  */
+  function scBuildResult(qty, size, transport, pSin, pCon, cp) {
+    var useTrucks = transport === "sin" || descargaModo === "camion";
+    var truckList = scBuildTruckList(qty, size);
+    var breakdown = []; var total = 0;
+    var pExtraTruck = typeof silvSea !== "undefined" ? (parseFloat(silvSea.extraTruckCost) || 1350.00) : 1350.00;
+    if (useTrucks) {
+      truckList.forEach(function (truck, idx) {
+        var label = "Cami\u00f3n " + (idx + 1) + ": " + truck.containers.map(function (c) { return c.qty + "\u00d7" + c.size + "'"; }).join(" + ");
+        breakdown.push({ label: label, price: pSin }); total += pSin;
+      });
+    } else {
+      truckList.forEach(function (truck, idx) {
+        if (idx === 0) {
+          /* Camión 1 — con grúa. Regla: ≤20' llenando el camión (4u) = tarifa 40' */
+          var truckUnits = truck.units || 0;
+          var has40 = truck.containers.some(function(c) { return c.size === 40; });
+          if (!has40 && truckUnits >= 4) {
+            /* Camión lleno sin 40': cobrar como equiv. 40' */
+            breakdown.push({ label: "Camión 1 (con grúa) – " + truck.containers.map(function(c){return c.qty+"×"+c.size+"'";}).join(" + ") + " [equiv. 40']", price: demoPriceC40 });
+            total += demoPriceC40;
+          } else {
+            truck.containers.forEach(function (c) {
+              var p = c.size === 40 ? demoPriceC40 : pCon;
+              for (var i = 1; i <= c.qty; i++) { breakdown.push({ label: "Camión 1 (con grúa) – Contenedor (" + c.size + "')", price: p }); total += p; }
+            });
+          }
+        } else {
+          /* Camiones extra — sin grúa: pSin + extra */
+          var priceExtra = pSin + pExtraTruck;
+          var lbl = truck.containers.map(function (c) { return c.qty + "\u00d7" + c.size + "'"; }).join(" + ");
+          breakdown.push({ label: "Cami\u00f3n " + (idx + 1) + " (sin gr\u00faa + extra): " + lbl, price: priceExtra });
+          total += priceExtra;
+        }
+      });
+    }
+    var trucks = truckList.length;
+    var transp_label = transport === "sin" ? "sin descarga" : "con descarga";
+    var detail = qty + "\u00d7" + size + "' \u00b7 " + transp_label + " \u00b7 Municipio Demo a CP " + cp + (trucks > 1 ? " \u00b7 " + trucks + " camiones" : "");
+    return { price: parseFloat(total.toFixed(2)), detail: detail, breakdown: breakdown, trucks: trucks, days: 3 };
+  }
+
+  /*  BUILD RESULT — CONSOLIDADO  */
+  function scBuildResultConsolidated(items, transport, cp) {
+    var allContainers = [];
+    items.forEach(function (item) {
+      for (var i = 0; i < item.quantity; i++) {
+        if (item.size === 40) allContainers.push({ size: 40, units: 4, name: item.name, is40: true });
+        else allContainers.push({ size: item.size, units: item.size / 10, name: item.name, is40: false });
+      }
+    });
+    var trucks = []; var remaining = [];
+    allContainers.forEach(function (c) {
+      if (c.is40) trucks.push({ containers: [{ size: 40, qty: 1, name: c.name }], units: 4 });
+      else remaining.push(c);
+    });
+    var current = []; var currentUnits = 0;
+    remaining.forEach(function (c) {
+      if (currentUnits + c.units <= 4) { current.push(c); currentUnits += c.units; }
+      else { if (current.length > 0) trucks.push({ containers: scConsolidateNamedTruck(current), units: currentUnits }); current = [c]; currentUnits = c.units; }
+    });
+    if (current.length > 0) trucks.push({ containers: scConsolidateNamedTruck(current), units: currentUnits });
+    var useTrucks = transport === "sin" || descargaModo === "camion";
+    var pExtraTruck = typeof silvSea !== "undefined" ? (parseFloat(silvSea.extraTruckCost) || 1350.00) : 1350.00;
+    var breakdown = []; var total = 0;
+    if (useTrucks) {
+      trucks.forEach(function (truck, idx) {
+        var label = "Cami\u00f3n " + (idx + 1) + ": " + truck.containers.map(function (c) { return c.qty + "\u00d7" + c.size + "'"; }).join(" + ") + " (DEMO)";
+        breakdown.push({ label: label, price: demoPriceSin }); total += demoPriceSin;
+      });
+    } else {
+      trucks.forEach(function (truck, idx) {
+        if (idx === 0) {
+          /* Camión 1 — con grúa. Regla: ≤20' llenando el camión (4u) = tarifa 40' */
+          var truckUnits = truck.units || 0;
+          var has40 = truck.containers.some(function(c) { return c.size === 40; });
+          if (!has40 && truckUnits >= 4) {
+            breakdown.push({ label: "Camión 1 (con grúa) – " + truck.containers.map(function(c){return c.qty+"×"+c.size+"'";}).join(" + ") + " [equiv. 40'] (DEMO)", price: demoPriceC40 });
+            total += demoPriceC40;
+          } else {
+            truck.containers.forEach(function (c) {
+              var p = c.size === 40 ? demoPriceC40 : demoPriceC20;
+              for (var i = 1; i <= c.qty; i++) { breakdown.push({ label: "Camión 1 (con grúa) – " + c.size + "' (DEMO)", price: p }); total += p; }
+            });
+          }
+        } else {
+          /* Camiones extra — sin grúa: demoPriceSin + extra */
+          var priceExtra = demoPriceSin + pExtraTruck;
+          var lbl = truck.containers.map(function (c) { return c.qty + "\u00d7" + c.size + "'"; }).join(" + ");
+          breakdown.push({ label: "Cami\u00f3n " + (idx + 1) + " (sin gr\u00faa + extra): " + lbl + " (DEMO)", price: priceExtra });
+          total += priceExtra;
+        }
+      });
+    }
+    var numTrucks = trucks.length;
+    var transp_label = transport === "sin" ? "sin descarga" : "con descarga";
+    var detail = "Selecci\u00f3n completa \u00b7 " + transp_label + " \u00b7 CP " + cp + (numTrucks > 1 ? " \u00b7 " + numTrucks + " camiones" : "");
+    return { price: parseFloat(total.toFixed(2)), detail: detail, breakdown: breakdown, trucks: numTrucks, days: 3 };
+  }
+
+  function scConsolidateNamedTruck(containers) {
+    var map = {};
+    containers.forEach(function (c) { var key = c.size + "_" + c.name; if (map[key]) map[key].qty++; else map[key] = { size: c.size, name: c.name, qty: 1 }; });
+    return Object.values(map);
+  }
+
+  /*  VALIDACIÓN  */
+  function scValidate() {
+    var origin = document.getElementById("scOriginCity").value;
+    var postal = document.getElementById("scPostalCode").value;
+    if (!origin) { scShowError("Por favor seleccion\u00e1 la ciudad de salida."); return false; }
+    if (!postal || postal.length < 4) { scShowError("Ingres\u00e1 un c\u00f3digo postal v\u00e1lido (m\u00ednimo 4 d\u00edgitos)."); return false; }
+    return true;
+  }
+
+  /*  CALCULAR  */
+  window.scCalculate = function () {
+    scClearResult(); if (!scValidate()) return;
+    document.getElementById("scLoaderArea").classList.remove("sc-hidden");
+    document.getElementById("scCalcBtn").disabled = true;
+    /* Demo consolidado */
+    if (demoMode && isConsolidated) {
+      setTimeout(function () {
+        var cp = document.getElementById("scPostalCode").value;
+        scShowResult(scBuildResultConsolidated(cartItems, currentTransport, cp));
+      }, 600); return;
+    }
+    /* Demo single */
+    if (demoMode) {
+      setTimeout(function () {
+        var qty = scGetQty(); var size = parseInt(productSize);
+        var pCon = size === 40 ? demoPriceC40 : demoPriceC20;
+        var cp = document.getElementById("scPostalCode").value;
+        scShowResult(scBuildResult(qty, size, currentTransport, demoPriceSin, pCon, cp));
+      }, 600); return;
+    }
+    /* Real consolidado */
+    if (isConsolidated) {
+      var payload = {
+        action: "silversea_calc_consolidated", nonce: typeof silvSea !== "undefined" ? silvSea.nonce : "",
+        method: "delivery", transport: currentTransport,
+        origin: document.getElementById("scOriginCity").value,
+        postal_code: document.getElementById("scPostalCode").value
+      };
+      var ajaxUrl2 = typeof silvSea !== "undefined" ? silvSea.ajaxUrl : "/wp-admin/admin-ajax.php";
+      var fd2 = new FormData(); Object.keys(payload).forEach(function (k) { fd2.append(k, payload[k]); });
+      fetch(ajaxUrl2, { method: "POST", body: fd2 })
+        .then(function (r) { return r.json(); })
+        .then(function (data) { if (data.success) scShowResult(data.data); else scShowError(data.data && data.data.message ? data.data.message : "Error al calcular. Intent\u00e1 nuevamente."); })
+        .catch(function () { scShowError("Error de conexi\u00f3n. Intent\u00e1 nuevamente."); });
+      return;
+    }
+    /* Real single */
+    var payload = {
+      action: "silversea_calc_shipping", nonce: typeof silvSea !== "undefined" ? silvSea.nonce : "",
+      method: "delivery", product_size: productSize, quantity: scGetQty(), transport: currentTransport,
+      origin: document.getElementById("scOriginCity").value,
+      postal_code: document.getElementById("scPostalCode").value
+    };
+    var ajaxUrl = typeof silvSea !== "undefined" ? silvSea.ajaxUrl : "/wp-admin/admin-ajax.php";
+    var formData = new FormData(); Object.keys(payload).forEach(function (k) { formData.append(k, payload[k]); });
+    fetch(ajaxUrl, { method: "POST", body: formData })
+      .then(function (r) { return r.json(); })
+      .then(function (data) { if (data.success) scShowResult(data.data); else scShowError(data.data && data.data.message ? data.data.message : "Error al calcular. Intent\u00e1 nuevamente."); })
+      .catch(function () { scShowError("Error de conexi\u00f3n. Intent\u00e1 nuevamente."); });
+  };
+
+})();
+
+
+/* ── DEPÓSITOS — mostrar dirección completa bajo el select ── */
+var scDepositos = {};
+if (typeof silvSea !== 'undefined' && Array.isArray(silvSea.cities)) {
+  silvSea.cities.forEach(function(city) {
+    scDepositos[city.key] = { nombre: city.depot, direccion: city.address };
+  });
+}
+
+function scShowDeposito(city, infoId) {
+  var el = document.getElementById(infoId);
+  if (!el) return;
+  var dep = scDepositos[city];
+  if (dep) {
+    el.innerHTML = '<strong>' + dep.nombre + '</strong><br>' + dep.direccion;
+    el.classList.remove('sc-hidden');
+  } else {
+    el.classList.add('sc-hidden');
+    el.innerHTML = '';
+  }
+}
+
+/* ── TOOLTIPS ── */
+(function () {
+  var bubble = null;
+
+  function createBubble(text, trigger) {
+    if (bubble) bubble.remove();
+    bubble = document.createElement("div");
+    bubble.className = "sc-tooltip-bubble";
+    bubble.textContent = text;
+    document.body.appendChild(bubble);
+    positionBubble(trigger);
+  }
+
+  function positionBubble(trigger) {
+    if (!bubble) return;
+    var rect = trigger.getBoundingClientRect();
+    var bw   = bubble.offsetWidth;
+    var left = rect.left + window.scrollX + rect.width / 2 - bw / 2;
+    var top  = rect.bottom + window.scrollY + 8;
+    if (left < 8) left = 8;
+    if (left + bw > window.innerWidth - 8) left = window.innerWidth - 8 - bw;
+    bubble.style.left     = left + "px";
+    bubble.style.top      = top  + "px";
+    bubble.style.position = "absolute";
+  }
+
+  function removeBubble() {
+    if (bubble) { bubble.remove(); bubble = null; }
+  }
+
+  document.addEventListener("click", function (e) {
+    var t = e.target.closest(".sc-tooltip-trigger");
+    if (t) {
+      e.stopPropagation();
+      if (bubble) { removeBubble(); return; }
+      var text = (t.dataset.tip || "").replace(/&#10;/g, "\n").replace(/&quot;/g, '"');
+      createBubble(text, t);
+    } else {
+      removeBubble();
+    }
+  });
+
+  window.addEventListener("scroll", removeBubble, true);
+  window.addEventListener("resize", removeBubble);
+})();
+
+/* ── REQUERIR COTIZACIÓN ANTES DE AGREGAR ── */
+(function() {
+  var requireQuote = typeof silvSea !== 'undefined' && silvSea.requireQuote === '1';
+  if ( ! requireQuote ) return;
+
+  /* True solo cuando el usuario cotizó durante ESTA visita a la página.
+     La cookie sc_prefs solo pre-llena campos, no desbloquea el botón. */
+  var quoteConfirmedThisVisit = false;
+
+  document.addEventListener('DOMContentLoaded', function() {
+    updateAddBtnState();
+
+    /* Cuando se confirma una cotización nueva, habilitar el botón */
+    document.addEventListener('silversea:shipping:saved', function(e) {
+      var d = e.detail || {};
+      if ( d.method === 'pickup' && d.pickup )        { quoteConfirmedThisVisit = true; updateAddBtnState(true); }
+      if ( d.method === 'delivery' && d.price > 0 )   { quoteConfirmedThisVisit = true; updateAddBtnState(true); }
+    });
+
+    /* Interceptar el click en el botón YITH para mostrar mensaje si no hay cotización */
+    document.body.addEventListener('click', function(e) {
+      var btn = e.target.closest('.yith-ywraq-add-to-quote, .add_to_quote_button, [class*="add-to-quote"]');
+      if ( ! btn ) return;
+      if ( btn.dataset.silvseaBlocked === '1' ) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        scShowRequireQuoteMsg();
+        return false;
+      }
+    }, true);
+  });
+
+  function updateAddBtnState(force_enable) {
+    /* Solo considerar "cotizado" si ocurrió en esta visita, no por cookie anterior */
+    var hasQuote = force_enable || quoteConfirmedThisVisit;
+
+    document.querySelectorAll('.yith-ywraq-add-to-quote, .add_to_quote_button, [class*="add-to-quote"]').forEach(function(btn) {
+      if ( hasQuote ) {
+        btn.dataset.silvseaBlocked = '0';
+        btn.style.opacity = '';
+        btn.title = '';
+      } else {
+        btn.dataset.silvseaBlocked = '1';
+        btn.style.opacity = '0.45';
+        btn.title = 'Cotizá el envío primero para poder agregar este contenedor';
+      }
+    });
+  }
+
+  function scShowRequireQuoteMsg() {
+    var existing = document.getElementById('sc-require-quote-msg');
+    if ( existing ) { existing.remove(); }
+
+    var msg = document.createElement('div');
+    msg.id = 'sc-require-quote-msg';
+    msg.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);'
+      + 'background:#0F2557;color:#fff;padding:14px 24px;border-radius:10px;'
+      + 'font-size:14px;font-weight:500;z-index:99999;box-shadow:0 4px 16px rgba(0,0,0,.2);'
+      + 'max-width:90vw;text-align:center;';
+    msg.textContent = 'Cotizá el envío antes de agregar este contenedor a tu selección.';
+    document.body.appendChild(msg);
+
+    setTimeout(function() { if ( msg.parentNode ) msg.remove(); }, 3500);
+  }
+})();
+
+
+/* ── COLOR RAL — selector en .sc-qty-row ── */
+(function () {
+  var colorData = (typeof silvSea !== 'undefined' && silvSea.productColor)
+    ? silvSea.productColor
+    : { type: 'none', label: '' };
+
+  if (colorData.type === 'none') return;
+
+  document.addEventListener('DOMContentLoaded', function () {
+    var qtyRow = document.querySelector('.sc-qty-row');
+    if (!qtyRow) return;
+    var sizeBadge = qtyRow.querySelector('.sc-size-badge');
+
+    var wrapper = document.createElement('div');
+    wrapper.className = 'sc-color-group';
+
+    var lbl = document.createElement('span');
+    lbl.className = 'sc-color-label';
+    lbl.textContent = 'Color';
+    wrapper.appendChild(lbl);
+
+    if (colorData.type === 'variable') {
+      var origSelect = document.querySelector('select[name="attribute_pa_color-ral"]');
+      if (!origSelect) return;
+
+      /* Clonar el select original para mostrarlo dentro del cotizador */
+      var mirror = origSelect.cloneNode(true);
+      mirror.id  = 'sc-color-mirror';
+      mirror.className = 'sc-color-select';
+      mirror.removeAttribute('data-attribute_name');
+      mirror.removeAttribute('data-show_option_none');
+      wrapper.appendChild(mirror);
+
+      /* mirror → original: propaga el change para que WC actualice la variación */
+      mirror.addEventListener('change', function () {
+        origSelect.value = this.value;
+        origSelect.dispatchEvent(new Event('change', { bubbles: true }));
+      });
+
+      /* original → mirror: si WC cambia el select (ej. reset), reflejar */
+      origSelect.addEventListener('change', function () {
+        if (mirror.value !== this.value) mirror.value = this.value;
+      });
+
+      /* Ocultar la tabla de variaciones original (ya está en el mirror) */
+      var table = document.querySelector('table.variations');
+      if (table) table.style.display = 'none';
+
+    } else if (colorData.type === 'simple') {
+      /* Producto simple: mostrar el color único desactivado */
+      var sel = document.createElement('select');
+      sel.className = 'sc-color-select';
+      sel.disabled  = true;
+      var opt = document.createElement('option');
+      opt.textContent = colorData.label;
+      sel.appendChild(opt);
+      wrapper.appendChild(sel);
+    }
+
+    if (sizeBadge) qtyRow.insertBefore(wrapper, sizeBadge);
+    else            qtyRow.appendChild(wrapper);
+  });
+})();
+
+
+/* ── EXTRAS WAPO — cards en el cotizador, sincronizadas con bloque nativo ── */
+(function () {
+  var extras = (typeof silvSea !== 'undefined' && Array.isArray(silvSea.extras) && silvSea.extras.length)
+    ? silvSea.extras : [];
+  if (!extras.length) return;
+
+  /* Estado global de selección (compartido entre todos los grids) */
+  var selectedValues = {};
+
+  /* Devuelve todos los inputs WAPO nativos que coinciden por value */
+  function wapoInputsByValue(value) {
+    return Array.prototype.slice.call(
+      document.querySelectorAll('.yith-wapo-option-value[value="' + value.replace(/"/g, '\\"') + '"]')
+    );
+  }
+
+  /* Actualiza visualmente una card (sin disparar su click) */
+  function setCardState(card, isSelected) {
+    card.classList.toggle('selected', isSelected);
+    var checkEl = card.querySelector('.sc-extra-check');
+    if (checkEl) checkEl.classList.toggle('checked', isSelected);
+  }
+
+  /* Actualiza TODAS las cards de todos los grids para un valor dado */
+  function syncAllCards(value, isSelected) {
+    document.querySelectorAll('.sc-extras-grid [data-extra-value="' + value.replace(/"/g, '\\"') + '"]')
+      .forEach(function (card) { setCardState(card, isSelected); });
+  }
+
+  /* Crea y devuelve una card para un extra dado */
+  function buildCard(extra) {
+    var card = document.createElement('div');
+    card.className = 'sc-extra-card';
+    card.dataset.extraValue = extra.value;
+
+    var check = document.createElement('span');
+    check.className = 'sc-extra-check';
+    card.appendChild(check);
+
+    if (extra.icon) {
+      var img = document.createElement('img');
+      img.src = extra.icon;
+      img.className = 'sc-extra-icon';
+      img.alt = '';
+      card.appendChild(img);
+    }
+
+    var lbl = document.createElement('span');
+    lbl.className = 'sc-extra-label';
+    lbl.textContent = extra.label;
+    card.appendChild(lbl);
+
+    if (extra.desc) {
+      var desc = document.createElement('span');
+      desc.className = 'sc-extra-desc';
+      desc.textContent = extra.desc;
+      card.appendChild(desc);
+    }
+
+    /* Card → sincronizar todos los grids + WAPO nativo */
+    card.addEventListener('click', function () {
+      var isSelected = !selectedValues[extra.value];
+      selectedValues[extra.value] = isSelected;
+
+      /* Actualizar todas las cards del mismo extra en todos los grids */
+      syncAllCards(extra.value, isSelected);
+
+      /* Togglear inputs WAPO nativos */
+      wapoInputsByValue(extra.value).forEach(function (inp) {
+        if (inp.checked !== isSelected) {
+          inp.checked = isSelected;
+          inp.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+      });
+    });
+
+    /* Reflejar estado actual */
+    if (selectedValues[extra.value]) setCardState(card, true);
+
+    return card;
+  }
+
+  document.addEventListener('DOMContentLoaded', function () {
+    var grids = document.querySelectorAll('.sc-extras-grid');
+    if (!grids.length) return;
+
+    /* ── Render cards en cada grid ── */
+    grids.forEach(function (grid) {
+      extras.forEach(function (extra) {
+        grid.appendChild(buildCard(extra));
+      });
+    });
+
+    /* ── Sync inicial: reflejar selecciones por defecto de WAPO ── */
+    document.querySelectorAll('.yith-wapo-option-value').forEach(function (inp) {
+      if (!inp.checked) return;
+      selectedValues[inp.value] = true;
+      syncAllCards(inp.value, true);
+    });
+
+    /* ── WAPO nativo → todos los grids ── */
+    document.addEventListener('change', function (e) {
+      if (!e.target || !e.target.classList.contains('yith-wapo-option-value')) return;
+      var value = e.target.value;
+      selectedValues[value] = e.target.checked;
+      syncAllCards(value, e.target.checked);
+    });
+
+    /* ── Inyectar en form.cart antes de que YITH envíe ── */
+    var form = document.querySelector('form.cart');
+    if (!form) return;
+    var yithBtn = form.querySelector('.yith-ywraq-add-to-quote, [name="yith_ywraq_add_item"]');
+    if (!yithBtn) return;
+
+    yithBtn.addEventListener('click', function () {
+      form.querySelectorAll('.sc-extra-injected').forEach(function (el) { el.remove(); });
+
+      var wapoInCart = form.querySelector('#yith-wapo-container');
+      if (!wapoInCart) {
+        extras.forEach(function (extra) {
+          if (!selectedValues[extra.value]) return;
+          var inp = document.createElement('input');
+          inp.type = 'hidden'; inp.className = 'sc-extra-injected';
+          inp.name = extra.name; inp.value = extra.value;
+          form.appendChild(inp);
+        });
+      }
+    }, true);
+  });
+})();
+
+
+/* ── VALIDAR COLOR ANTES DE AÑADIR (productos variables) ── */
+(function () {
+  document.addEventListener('DOMContentLoaded', function () {
+    /* Solo activo en productos variables con selector de color */
+    var mirror = document.getElementById('sc-color-mirror');
+    if (!mirror) return;
+
+    /* Captura el click antes que YITH (capture: true, después del bloqueo de requireQuote) */
+    document.body.addEventListener('click', function (e) {
+      var btn = e.target.closest('.yith-ywraq-add-to-quote, .add_to_quote_button, [class*="add-to-quote"]');
+      if (!btn) return;
+
+      /* Si el botón ya está bloqueado por requireQuote (silvseaBlocked='1'),
+         ese listener ya habrá hecho stopImmediatePropagation y nunca llegamos acá.
+         Solo validamos color cuando el quote está OK. */
+      if (!mirror.value) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+
+        /* Resaltar el selector con borde rojo + animación */
+        mirror.classList.add('sc-color-error');
+        mirror.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+        /* Quitar el error cuando el usuario elija un color */
+        mirror.addEventListener('change', function onColorPicked() {
+          mirror.classList.remove('sc-color-error');
+          mirror.removeEventListener('change', onColorPicked);
+        });
+
+        /* Toast de error */
+        scShowColorRequiredMsg();
+        return false;
+      }
+    }, true);
+  });
+
+  function scShowColorRequiredMsg() {
+    var existing = document.getElementById('sc-color-required-msg');
+    if (existing) existing.remove();
+
+    var msg = document.createElement('div');
+    msg.id = 'sc-color-required-msg';
+    msg.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);'
+      + 'background:#dc2626;color:#fff;padding:14px 24px;border-radius:10px;'
+      + 'font-size:14px;font-weight:500;z-index:99999;box-shadow:0 4px 16px rgba(0,0,0,.2);'
+      + 'max-width:90vw;text-align:center;';
+    msg.textContent = 'Seleccioná un color RAL antes de añadir a tu selección.';
+    document.body.appendChild(msg);
+    setTimeout(function () { if (msg.parentNode) msg.remove(); }, 3500);
+  }
+})();
+
+
+/* ── GALERÍA: filtrar imágenes al elegir variación de color ──
+   Cuando se elige una variación, solo queda visible la imagen
+   correspondiente; las demás se ocultan con fade.
+   Al resetear la variación, se muestran todas de nuevo.
+──────────────────────────────────────────────────────────── */
+(function () {
+  var $ = typeof jQuery !== 'undefined' ? jQuery : null;
+  if (!$) return;
+
+  $(function () {
+    var $form    = $('form.cart');
+    var $gallery = $('.woocommerce-product-gallery');
+    if (!$form.length || !$gallery.length) return;
+
+    var $items = $gallery.find('.woocommerce-product-gallery__image');
+    if ($items.length <= 1) return; // una sola imagen, nada que filtrar
+
+    /* Capturar el attachment ID de cada ítem desde su clase wp-image-{id}
+       ANTES de que WooCommerce haga cualquier swap de imagen */
+    var originalIds = $items.map(function () {
+      var cls = $(this).find('img').first().attr('class') || '';
+      var m   = cls.match(/wp-image-(\d+)/);
+      return m ? parseInt(m[1], 10) : 0;
+    }).get();
+
+    /* También capturar IDs del thumbnail strip (si existe) */
+    var $thumbs     = $gallery.find('.flex-control-thumbs li, .woocommerce-product-gallery__thumb');
+    var thumbHasIds = $thumbs.length > 0;
+    var thumbIds    = thumbHasIds ? $thumbs.map(function () {
+      var cls = $(this).find('img').first().attr('class') || '';
+      var m   = cls.match(/wp-image-(\d+)/);
+      return m ? parseInt(m[1], 10) : 0;
+    }).get() : [];
+
+    function filterGallery(varImgId) {
+      /* Si ningún ítem coincide, mostrar todo (la imagen de variación no está en la galería) */
+      var hasMatch = originalIds.some(function (id) { return id === varImgId; });
+      if (!hasMatch) { showAll(); return; }
+
+      $items.each(function (i) {
+        if (originalIds[i] === varImgId) $(this).stop(true).fadeIn(200);
+        else                             $(this).stop(true).fadeOut(150);
+      });
+
+      if (thumbHasIds) {
+        $thumbs.each(function (i) {
+          $(this).toggle(thumbIds[i] === varImgId || thumbIds[i] === 0);
+        });
+      }
+    }
+
+    function showAll() {
+      $items.stop(true).fadeIn(200);
+      if (thumbHasIds) $thumbs.show();
+    }
+
+    $form.on('found_variation', function (e, variation) {
+      var varId = variation && variation.image_id ? parseInt(variation.image_id, 10) : 0;
+      if (!varId) { showAll(); return; }
+      filterGallery(varId);
+    });
+
+    $form.on('reset_data', showAll);
+  });
+})();

@@ -1,0 +1,517 @@
+/* silversea-shipping.css */
+
+.sc-wrap { padding: 0; max-width: 540px; margin: 0 auto; }
+
+.sc-card {
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  padding: 1.5rem;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+.sc-title {
+    font-family: "Accord", Sans-serif;
+    font-size: 16px;
+    font-weight: 700;
+    line-height: 30px;
+    color: #222E5C;
+    margin: 0;
+}
+
+/* ── method toggle ── */
+.sc-toggle {
+  display: flex;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  overflow: hidden;
+  margin-bottom: 1.5rem;
+}
+.sc-toggle-btn {
+  flex: 1;
+  padding: 10px 16px;
+  font-size: 14px;
+  font-weight: 500;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  color: #6b7280;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  transition: background .15s, color .15s;
+}
+.sc-toggle-btn:hover { background: #0088DC; }
+.sc-toggle-btn.active {
+  background: #f3f4f6;
+  color: #111827;
+}
+.sc-toggle-btn .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border: 2px solid #d1d5db;
+  flex-shrink: 0;
+}
+.sc-toggle-btn.active .dot {
+  background: #0088DC;
+  border-color: #0088DC;
+}
+
+/* ── fields ── */
+.sc-field { margin-bottom: 1.2rem; }
+
+.sc-label {
+    font-family: "Accord", Sans-serif;
+    font-size: 16px;
+    font-weight: 700;
+    line-height: 30px;
+    color: #222E5C;
+    margin: 0;
+}
+.sc-label-info {
+  font-size: 11px;
+  background: #f3f4f6;
+  border: 1px solid #e5e7eb;
+  border-radius: 4px;
+  padding: 2px 7px;
+  color: #9ca3af;
+}
+
+.sc-select,
+.sc-input {
+  width: 100%;
+  padding: 9px 12px;
+  font-size: 14px;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  background: #fff;
+  color: #111827;
+  box-sizing: border-box;
+  transition: border-color .15s;
+  appearance: auto;
+}
+.sc-select:focus,
+.sc-input:focus {
+  outline: none;
+  border-color: #222E5C;
+  box-shadow: 0 0 0 3px rgba(24,95,165,.12);
+}
+
+/* ── size / transport toggle buttons ── */
+.sc-size-toggle {
+  display: flex;
+  gap: 8px;
+}
+.sc-size-btn {
+  flex: 1;
+  padding: 9px;
+  font-size: 13px;
+  font-weight: 500;
+  background: transparent;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  cursor: pointer;
+  color: #6b7280;
+  transition: all .15s;
+}
+.sc-size-btn.active {
+  background: #EBF4FF;
+  border-color: #93C5FD;
+  color: #1e40af;
+}
+.sc-size-btn:hover:not(.active) { background: #f9fafb; color: #1e40af; }
+
+/* ── tip box ── */
+.sc-tip {
+  font-size: 13px;
+  color: #374151;
+  background: #f3f4f6;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-bottom: 1.25rem;
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  line-height: 1.5;
+}
+.sc-tip-icon { font-size: 14px; flex-shrink: 0; margin-top: 1px; }
+
+/* ── calculate button ── */
+.sc-btn-calc {
+  width: 100%;
+  padding: 12px;
+  font-size: 14px;
+  font-weight: 600;
+  background: #222E5C;
+  border: none;
+  border-radius: 8px;
+  color: #fff;
+  cursor: pointer;
+  transition: background .15s;
+  letter-spacing: .01em;
+  margin-top: 30px;
+}
+.sc-btn-calc:hover { background: #0088DC; }
+.sc-btn-calc:disabled { opacity: .5; cursor: default; }
+
+/* ── result ── */
+.sc-result {
+  margin-top: 1.25rem;
+  border-top: 1px solid #e5e7eb;
+  padding-top: 1.25rem;
+}
+.sc-result-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+.sc-result-label { font-size: 13px; color: #6b7280; }
+.sc-result-price { font-size: 26px; font-weight: 600; color: #111827; }
+.sc-result-free  { font-size: 22px; font-weight: 600; color: #1D9E75; }
+.sc-result-detail { font-size: 12px; color: #9ca3af; margin-top: 4px; }
+.sc-result-days {
+  font-size: 13px;
+  color: #374151;
+  background: #f3f4f6;
+  border-radius: 8px;
+  padding: 8px 12px;
+  margin-top: 12px;
+}
+
+/* ── feedback ── */
+.sc-loader { font-size: 13px; color: #6b7280; text-align: center; padding: 12px 0; }
+.sc-error  { font-size: 13px; color: #b91c1c; background: #fef2f2; border: 1px solid #fecaca; border-radius: 8px; padding: 8px 12px; margin-top: 12px; }
+
+.sc-hidden { display: none !important; }
+
+/* ── cantidad + badge tamaño ── */
+.sc-qty-row {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  margin-bottom: 1.25rem;
+  gap: 16px;
+}
+.sc-qty-group { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; }
+.sc-qty-label {
+    font-family: "Accord", Sans-serif;
+    font-size: 16px;
+    font-weight: 700;
+    line-height: 30px;
+    color: #222E5C;
+    margin: 0;
+}
+.sc-qty-ctrl {
+  display: flex;
+  align-items: center;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  overflow: hidden;
+}
+.sc-qty-btn {
+  width: 36px;
+  height: 36px;
+  background: transparent;
+  border: none;
+  font-size: 18px;
+  color: #374151;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background .12s;
+}
+.sc-qty-btn:hover { background: #f3f4f6; }
+.sc-qty-val {
+  min-width: 32px;
+  text-align: center;
+  font-size: 15px;
+  font-weight: 600;
+  color: #111827;
+  border-left: 1px solid #e5e7eb;
+  border-right: 1px solid #e5e7eb;
+  padding: 0 4px;
+  line-height: 36px;
+}
+.sc-size-badge {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+}
+.sc-size-badge-label { display: none; }
+.sc-size-badge-val {
+  font-size: 14px;
+  font-weight: 600;
+  color: #1e40af;
+  background: #EBF4FF;
+  border: 1px solid #93C5FD;
+  border-radius: 6px;
+  padding: 3px 10px;
+}
+.sc-divider {
+  height: 1px;
+  background: #f3f4f6;
+  margin-bottom: 1.25rem;
+}
+
+/* ── botón continuar (pickup) ── */
+.sc-btn-continue {
+  width: 100%;
+  padding: 12px;
+  font-size: 14px;
+  font-weight: 600;
+  background: #222E5C;
+  border: none;
+  border-radius: 8px;
+  color: #fff;
+  cursor: pointer;
+  transition: background .15s;
+  margin-top: 30px;
+}
+.sc-btn-continue:hover { background: #0088DC; }
+
+/* ── desglose de camiones ── */
+.sc-result-breakdown {
+  font-size: 12px;
+  color: #6b7280;
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px dashed #e5e7eb;
+}
+
+/* ── items consolidado ── */
+.sc-items-summary { margin-bottom: 0; }
+.sc-items-list { display: flex; flex-direction: column; gap: 4px; margin-bottom: 0; }
+.sc-item-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 13px;
+  padding: 6px 0;
+  border-bottom: 0.5px solid var(--sl-border, #e5e7eb);
+}
+.sc-item-name   { color: #374151; }
+.sc-item-detail {
+  font-weight: 600;
+  color: #0F2557;
+  background: #EBF4FF;
+  border-radius: 6px;
+  padding: 2px 10px;
+  font-size: 12px;
+}
+
+
+/* ════════════════════════════════════════
+   TOOLTIPS — cotizador
+════════════════════════════════════════ */
+
+.sc-tooltip-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #e0e7ef;
+  color: #222E5C;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  margin-left: 5px;
+  vertical-align: middle;
+  position: relative;
+  flex-shrink: 0;
+  transition: background .15s;
+  user-select: none;
+}
+.sc-tooltip-trigger:hover {
+  background: #222E5C;
+  color: #fff;
+}
+.sc-tooltip-bubble {
+  position: absolute;
+  z-index: 9999;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0,0,0,.13);
+  padding: 14px 16px;
+  width: 280px;
+  font-size: 13px;
+  line-height: 1.55;
+  color: #374151;
+  white-space: pre-wrap;
+  pointer-events: none;
+}
+.sc-tooltip-bubble strong { color: #0F2557; }
+
+
+/* ════════════════════════════════════════
+   DEPÓSITO — dirección bajo el select
+════════════════════════════════════════ */
+
+.sc-deposito-info {
+  margin-top: 8px;
+  padding: 10px 14px;
+  background: #f0f6ff;
+  border-left: 3px solid #222E5C;
+  border-radius: 0 8px 8px 0;
+  font-size: 12px;
+  color: #374151;
+  line-height: 1.5;
+}
+.sc-deposito-info strong {
+  display: block;
+  color: #0F2557;
+  font-size: 13px;
+  margin-bottom: 2px;
+}
+
+
+/* ════════════════════════════════════════
+   COLOR RAL — selector inline en sc-qty-row
+════════════════════════════════════════ */
+
+.sc-color-group {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+  max-width: 160px;
+}
+.sc-color-label {
+    font-family: "Accord", Sans-serif;
+    font-size: 16px;
+    font-weight: 700;
+    line-height: 30px;
+    color: #222E5C;
+    margin: 0;
+}
+.sc-color-select {
+  font-size: 14px;
+  font-weight: 400;
+  color: #111827;
+  background: #fff;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  padding: 8px 10px;
+  cursor: pointer;
+  width: 100%;
+  box-sizing: border-box;
+  transition: border-color .15s;
+  -webkit-appearance: auto;
+  appearance: auto;
+}
+.sc-color-select:focus {
+  outline: none;
+  border-color: #222E5C;
+  box-shadow: 0 0 0 3px rgba(24,95,165,.12);
+}
+.sc-color-select:disabled {
+  cursor: default;
+  background: #f9fafb;
+  color: #6b7280;
+  opacity: 1;
+}
+.sc-color-select.sc-color-error {
+  border-color: #dc2626 !important;
+  box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.18) !important;
+  animation: sc-color-shake 0.35s ease;
+}
+@keyframes sc-color-shake {
+  0%, 100% { transform: translateX(0); }
+  20%       { transform: translateX(-5px); }
+  60%       { transform: translateX(5px); }
+  80%       { transform: translateX(-3px); }
+}
+
+/* ════════════════════════════════════════
+   EXTRAS DISPONIBLES — cards
+════════════════════════════════════════ */
+
+.sc-extras-section { margin-top: 0; }
+
+.sc-extras-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+
+.sc-extra-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 20px 10px 10px;
+  border: 2px solid #48628425;
+  border-radius: 4px;
+  cursor: pointer;
+  text-align: center;
+  background: #fff;
+  transition: border-color .15s, background .15s;
+  user-select: none;
+}
+.sc-extra-card:hover { border-color: #0088DC; background: #f8fbff; }
+.sc-extra-card.selected {
+  border-color: #0088DC;
+  background: #EBF4FF;
+}
+
+/* Indicador check — círculo top-left */
+.sc-extra-check {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 1px solid #0088dc;
+  background: #fff;
+  transition: border-color .15s, background .15s;
+  flex-shrink: 0;
+}
+.sc-extra-check.checked {
+  border-color: #0088dc;
+  background: #0088dc;
+}
+.sc-extra-check.checked::after {
+    content: '';
+    display: block;
+    width: 90%;
+    height: 90%;
+    border: 2px solid #fff;
+    border-radius: 100%;
+    margin: 5% auto;
+}
+
+.sc-extra-icon {
+  width: 35px;
+  height: 35px;
+  object-fit: contain;
+  margin-top: 4px;
+}
+.sc-extra-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #111827;
+  line-height: 1.3;
+}
+.sc-extra-desc {
+  font-size: 11px;
+  color: #6b7280;
+  line-height: 1.4;
+}
+
+/* ── ocultar campo qty nativo de WooCommerce (solo se carga cuando hay cotizador) ── */
+form.cart .quantity,
+form.cart .qty-label { display: none !important; }
+
+/* ── render nativo de WAPO — visible para referencia ── */
+#yith-wapo-container { display: none !important; }
