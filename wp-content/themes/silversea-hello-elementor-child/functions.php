@@ -32,3 +32,7 @@ add_action( 'wp_enqueue_scripts', function() {
 		HELLO_ELEMENTOR_CHILD_VERSION
 	);
 }, 20 );
+
+add_action( 'wp_mail_failed', function( $error ) {
+    error_log( '[Silversea] wp_mail_failed: ' . $error->get_error_message() );
+});

@@ -630,6 +630,14 @@ function silversea_shipping_shortcode( $atts = [] ) {
           <span class="sc-size-badge-val"><?php echo esc_html($size_label); ?></span>
         </div>
       </div>
+      <div class="sc-bulk-notice">
+        <span class="sc-bulk-notice-icon">?</span>
+        <div>
+          <strong>¿Necesitas más de 7 contenedores?</strong><br>
+          Contáctate con nuestro equipo comercial enviando un correo a
+          <a href="mailto:sales@silverseacontainers.com">sales@silverseacontainers.com</a>
+        </div>
+      </div>
       <?php endif; ?>
 
       <?php if ( $mode === 'consolidated' && ! empty($items_summary) ) : ?>

@@ -1531,9 +1531,103 @@ add_action( 'wp_loaded', function() {
         
         if ( ! empty( $raq ) ) {
             YITH_Request_Quote()->raq_content = $raq;
-            
+
             // Llamar send_message manualmente ahora que el carrito est� cargado
             YITH_Request_Quote()->send_message();
         }
     }
 }, 20 );
+
+
+/* ══════════════════════════════════════════════════════════════
+   COLOR GALLERY FILTER
+   Productos variables con pa_color-ral: filtra las imágenes del
+   gallery según el color seleccionado en el dropdown.
+══════════════════════════════════════════════════════════════ */
+
+/**
+ * Inyecta data-sc-image-id en cada slide principal de la galería.
+ * Permite al JS identificar a qué color pertenece cada imagen.
+ */
+add_filter( 'woocommerce_single_product_image_html', 'silversea_gallery_slide_image_id', 10, 2 );
+
+function silversea_gallery_slide_image_id( $html, $attachment_id ) {
+    return str_replace(
+        'class="woocommerce-product-gallery__image"',
+        'class="woocommerce-product-gallery__image" data-sc-image-id="' . (int) $attachment_id . '"',
+        $html
+    );
+}
+
+/**
+ * Inyecta data-sc-image-id en cada thumbnail de la galería.
+ */
+add_filter( 'woocommerce_single_product_image_thumbnail_html', 'silversea_gallery_thumb_image_id', 10, 2 );
+
+function silversea_gallery_thumb_image_id( $html, $attachment_id ) {
+    return str_replace( '<img ', '<img data-sc-image-id="' . (int) $attachment_id . '" ', $html );
+}
+
+/**
+ * Inyecta scColorGallery (mapa color → image IDs) en el footer
+ * de las páginas de producto variable. Encola el JS de filtro.
+ */
+add_action( 'wp_footer', 'silversea_inject_color_gallery_data', 15 );
+
+function silversea_inject_color_gallery_data() {
+    if ( ! is_product() ) return;
+
+    global $product;
+    if ( ! $product ) $product = wc_get_product( get_the_ID() );
+    if ( ! $product || ! $product->is_type( 'variable' ) ) return;
+
+    $color_map  = [];
+    $main_img   = (int) $product->get_image_id();
+
+    /* ── 1. Imagen principal de cada variación ── */
+    $valid_colors = [];
+    foreach ( $product->get_available_variations() as $var_data ) {
+        $slug   = $var_data['attributes']['attribute_pa_color-ral'] ?? '';
+        $img_id = (int) ( $var_data['image_id'] ?? 0 );
+        if ( ! $slug ) continue;
+        $valid_colors[] = $slug;
+        if ( $img_id && $img_id !== $main_img ) {
+            $color_map[ $slug ][] = $img_id;
+        }
+    }
+    $valid_colors = array_unique( $valid_colors );
+
+    /* ── 2. Imágenes extra de la galería del producto taggeadas por alt ──
+     * Para agregar imágenes a un color: en Biblioteca de medios → imagen →
+     * campo "Texto alternativo" → ponés el slug exacto del color
+     * (el mismo que aparece en la URL del atributo, ej: "ral-9016-blanco").
+     */
+    foreach ( $product->get_gallery_image_ids() as $gid ) {
+        $gid = (int) $gid;
+        if ( $gid === $main_img ) continue;
+        $alt = trim( get_post_meta( $gid, '_wp_attachment_image_alt', true ) );
+        if ( $alt && in_array( $alt, $valid_colors, true ) ) {
+            $color_map[ $alt ][] = $gid;
+        }
+    }
+
+    if ( empty( $color_map ) ) return;
+
+    foreach ( $color_map as &$ids ) {
+        $ids = array_values( array_unique( $ids ) );
+    }
+    unset( $ids );
+
+    echo '<script>var scColorGallery = ' . wp_json_encode( [
+        'colorMap' => $color_map,
+        'attrKey'  => 'attribute_pa_color-ral',
+    ] ) . ';</script>' . "\n";
+
+    wp_enqueue_script(
+        'silversea-color-gallery',
+        SILVERSEA_PLUGIN_URL . 'assets/js/color-gallery.js',
+        [ 'jquery' ],
+        '1.0.0',
+        true
+    );
+}
