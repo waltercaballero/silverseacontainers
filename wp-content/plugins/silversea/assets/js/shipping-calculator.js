@@ -628,9 +628,23 @@ function scShowDeposito(city, infoId) {
         if (mirror.value !== this.value) mirror.value = this.value;
       });
 
-      /* Ocultar la tabla de variaciones original (ya está en el mirror) */
+      /* Ocultar solo la fila del color RAL en la tabla de variaciones.
+         Si hay más atributos (tamaño, condición…) se mantienen visibles. */
       var table = document.querySelector('table.variations');
-      if (table) table.style.display = 'none';
+      if (table) {
+        var attrRows = table.querySelectorAll('tr');
+        if (attrRows.length <= 1) {
+          /* Un único atributo → ocultar toda la tabla */
+          table.style.display = 'none';
+        } else {
+          /* Múltiples atributos → solo ocultar la fila del color */
+          attrRows.forEach(function(row) {
+            if (row.querySelector('select[name="attribute_pa_color-ral"]')) {
+              row.style.display = 'none';
+            }
+          });
+        }
+      }
 
     } else if (colorData.type === 'simple') {
       /* Producto simple: mostrar el color único desactivado */
@@ -834,68 +848,4 @@ function scShowDeposito(city, infoId) {
 })();
 
 
-/* ── GALERÍA: filtrar imágenes al elegir variación de color ──
-   Cuando se elige una variación, solo queda visible la imagen
-   correspondiente; las demás se ocultan con fade.
-   Al resetear la variación, se muestran todas de nuevo.
-──────────────────────────────────────────────────────────── */
-(function () {
-  var $ = typeof jQuery !== 'undefined' ? jQuery : null;
-  if (!$) return;
-
-  $(function () {
-    var $form    = $('form.cart');
-    var $gallery = $('.woocommerce-product-gallery');
-    if (!$form.length || !$gallery.length) return;
-
-    var $items = $gallery.find('.woocommerce-product-gallery__image');
-    if ($items.length <= 1) return; // una sola imagen, nada que filtrar
-
-    /* Capturar el attachment ID de cada ítem desde su clase wp-image-{id}
-       ANTES de que WooCommerce haga cualquier swap de imagen */
-    var originalIds = $items.map(function () {
-      var cls = $(this).find('img').first().attr('class') || '';
-      var m   = cls.match(/wp-image-(\d+)/);
-      return m ? parseInt(m[1], 10) : 0;
-    }).get();
-
-    /* También capturar IDs del thumbnail strip (si existe) */
-    var $thumbs     = $gallery.find('.flex-control-thumbs li, .woocommerce-product-gallery__thumb');
-    var thumbHasIds = $thumbs.length > 0;
-    var thumbIds    = thumbHasIds ? $thumbs.map(function () {
-      var cls = $(this).find('img').first().attr('class') || '';
-      var m   = cls.match(/wp-image-(\d+)/);
-      return m ? parseInt(m[1], 10) : 0;
-    }).get() : [];
-
-    function filterGallery(varImgId) {
-      /* Si ningún ítem coincide, mostrar todo (la imagen de variación no está en la galería) */
-      var hasMatch = originalIds.some(function (id) { return id === varImgId; });
-      if (!hasMatch) { showAll(); return; }
-
-      $items.each(function (i) {
-        if (originalIds[i] === varImgId) $(this).stop(true).fadeIn(200);
-        else                             $(this).stop(true).fadeOut(150);
-      });
-
-      if (thumbHasIds) {
-        $thumbs.each(function (i) {
-          $(this).toggle(thumbIds[i] === varImgId || thumbIds[i] === 0);
-        });
-      }
-    }
-
-    function showAll() {
-      $items.stop(true).fadeIn(200);
-      if (thumbHasIds) $thumbs.show();
-    }
-
-    $form.on('found_variation', function (e, variation) {
-      var varId = variation && variation.image_id ? parseInt(variation.image_id, 10) : 0;
-      if (!varId) { showAll(); return; }
-      filterGallery(varId);
-    });
-
-    $form.on('reset_data', showAll);
-  });
-})();
+/* Filtrado de galería por color — manejado por color-gallery.js */

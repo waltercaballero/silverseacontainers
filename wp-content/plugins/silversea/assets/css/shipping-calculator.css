@@ -204,9 +204,12 @@
   border-radius: 8px;
   padding: 12px 14px;
   margin-bottom: 1.25rem;
-  font-size: 13px;
+  font-family: "Accord", Sans-serif;
+  font-size: 16px;
+  font-weight: 400;
+  line-height: 20px;
+  letter-spacing: 0.5px;
   color: #374151;
-  line-height: 1.5;
 }
 .sc-bulk-notice-icon {
   flex-shrink: 0;
@@ -216,10 +219,11 @@
   background: #185FA5;
   color: #fff;
   font-weight: 700;
-  font-size: 13px;
+  font-size: 14px;
   display: flex;
   align-items: center;
   justify-content: center;
+  text-indent: 2px;
 }
 .sc-bulk-notice strong { color: #0F2557; }
 .sc-bulk-notice a { color: #185FA5; text-decoration: none; }

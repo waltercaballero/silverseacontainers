@@ -1,6 +1,6 @@
-# Silversea – Cotizador de Envío de Contenedores
+# Silversea – Plugin de Cotización de Contenedores
 
-Plugin WordPress personalizado para Silversea Containers. Integra un cotizador de transporte de contenedores marítimos (10', 20', 40') con el carrito de YITH Request a Quote (YWRAQ).
+Plugin WordPress personalizado para Silversea Containers. Integra un cotizador de transporte de contenedores marítimos con el carrito de YITH Request a Quote (YWRAQ) y envío automático de leads a Salesforce.
 
 ---
 
@@ -8,18 +8,23 @@ Plugin WordPress personalizado para Silversea Containers. Integra un cotizador d
 
 1. [Estructura de archivos](#estructura-de-archivos)
 2. [Dependencias](#dependencias)
-3. [Base de datos](#base-de-datos)
-4. [Panel de administración](#panel-de-administración)
-5. [Widget del cotizador](#widget-del-cotizador)
-6. [Lógica de cálculo](#lógica-de-cálculo)
-7. [Sesión y persistencia](#sesión-y-persistencia)
-8. [CPT silversea_quote](#cpt-silversea_quote)
-9. [Emails](#emails)
-10. [Shortcodes de la página "Mi selección"](#shortcodes-de-la-página-mi-selección)
-11. [Extras (YITH WAPO)](#extras-yith-wapo)
-12. [Flujo completo del usuario](#flujo-completo-del-usuario)
-13. [Modo demo](#modo-demo)
-14. [FTP / Despliegue](#ftp--despliegue)
+3. [Menú admin](#menú-admin)
+4. [Base de datos](#base-de-datos)
+5. [Configuración disponible](#configuración-disponible)
+6. [Ciudades / Depósitos](#ciudades--depósitos)
+7. [Widget del cotizador](#widget-del-cotizador)
+8. [Galería de colores](#galería-de-colores)
+9. [Lógica de cálculo](#lógica-de-cálculo)
+10. [Sesión y persistencia](#sesión-y-persistencia)
+11. [CPT silversea_quote](#cpt-silversea_quote)
+12. [Emails](#emails)
+13. [Integración Salesforce](#integración-salesforce)
+14. [Shortcodes de la página "Mi selección"](#shortcodes-de-la-página-mi-selección)
+15. [Extras (YITH WAPO)](#extras-yith-wapo)
+16. [Herramientas admin de productos](#herramientas-admin-de-productos)
+17. [Flujo completo del usuario](#flujo-completo-del-usuario)
+18. [Modo demo](#modo-demo)
+19. [FTP / Despliegue](#ftp--despliegue)
 
 ---
 
@@ -27,16 +32,22 @@ Plugin WordPress personalizado para Silversea Containers. Integra un cotizador d
 
 ```
 wp-content/plugins/silversea/
-├── silversea.php                          # Plugin principal: includes, shortcodes auxiliares,
-│                                          # integración Salesforce, selector de países/banderas
+├── silversea.php                          # Plugin principal: includes, color gallery,
+│                                          # selector de países/banderas, columnas admin
 ├── includes/
-│   ├── shipping-calculator.php            # Tabla BD, menú admin, página admin, AJAX calc, enqueue JS/CSS
-│   ├── shipping-quote-calc.php            # Funciones de cálculo puro (sin WP output)
+│   ├── shipping-calculator.php            # Tabla BD, menú admin, página config, AJAX calc,
+│   │                                      # enqueue JS/CSS, exportación CSV de productos
+│   ├── shipping-quote-calc.php            # Funciones de cálculo puro (sin WP output),
+│   │                                      # helpers de ciudades/depósitos
 │   ├── shipping-session.php               # AJAX save-shipping, CPT silversea_quote, emails
-│   └── shipping-quote-pages.php          # Shortcodes de la página YWRAQ
+│   ├── shipping-quote-pages.php           # Shortcodes de la página YWRAQ
+│   └── salesforce.php                     # Integración Salesforce Web-to-Lead:
+│                                          # envío, mapeo de tipos, página de mapeo en lote,
+│                                          # meta box en cotizaciones, re-envío manual
 └── assets/
     ├── js/
     │   ├── shipping-calculator.js         # Widget cotizador (frontend)
+    │   ├── color-gallery.js               # Filtro de galería por color RAL
     │   └── scripts.js                     # Selector de banderas/países
     └── css/
         ├── shipping-calculator.css        # Estilos del widget cotizador
@@ -49,9 +60,29 @@ wp-content/plugins/silversea/
 
 | Plugin | Uso |
 |--------|-----|
-| WooCommerce | Sesión, productos, taxonomías (`pa_tamano`, `pa_condicion`) |
-| YITH Request a Quote (YWRAQ) | Carrito de cotización, shortcodes, envío de emails |
-| YITH WooCommerce Product Add-Ons (WAPO) | Opciones de extras (seguro, pintura, etc.) en los productos |
+| WooCommerce | Sesión, productos, taxonomías (`pa_tamano`, `pa_condicion`, `pa_color-ral`) |
+| YITH Request a Quote (YWRAQ) | Carrito de cotización, shortcodes, envío de formulario |
+| YITH WooCommerce Product Add-Ons (WAPO) | Extras en productos (seguro, pintura, etc.) |
+
+---
+
+## Menú admin
+
+El plugin crea una estructura de menú propia en el panel de WordPress:
+
+```
+💰 Cotizador                  → Configuración general + importación de tarifas
+   ├── Configuración
+   ├── € Precios              → Editor masivo de precios
+   ├── ↕ Ordenar             → Reordenador drag & drop de productos
+   └── Salesforce            → Mapeo en lote producto → ContainerType
+   
+📋 Cotizaciones              → Listado del CPT silversea_quote (leads guardados)
+   ├── Todas las cotizaciones
+   └── Nueva cotización
+```
+
+> En versiones anteriores, "Precios" y "Ordenar" estaban dentro del menú **Productos**. Ahora están bajo **Cotizador**.
 
 ---
 
@@ -62,78 +93,119 @@ wp-content/plugins/silversea/
 | Columna | Tipo | Descripción |
 |---------|------|-------------|
 | `id` | BIGINT | PK auto-increment |
-| `ciudad_origen` | VARCHAR(20) | `barcelona` \| `madrid` \| `madrid2` \| `valencia` |
+| `ciudad_origen` | VARCHAR(20) | Clave de ciudad de origen (ej. `barcelona`) |
 | `cp_destino` | VARCHAR(10) | Código postal de destino (4–5 dígitos) |
 | `municipio_destino` | VARCHAR(120) | Nombre del municipio |
-| `km` | SMALLINT | Kilómetros para estimar días de entrega |
+| `km` | SMALLINT | Kilómetros (para estimar días de entrega) |
 | `precio_sin_descarga` | DECIMAL(10,2) | Precio por camión, sin grúa |
 | `precio_con_desc_20` | DECIMAL(10,2) | Precio por contenedor 20', con grúa |
 | `precio_con_desc_40` | DECIMAL(10,2) | Precio por contenedor 40', con grúa |
 
 **Índices:** `UNIQUE (ciudad_origen, cp_destino)`, `KEY (cp_destino)`.
 
-**Importación:** Panel admin acepta CSV, XLSX o JSON. La búsqueda de tarifa primero intenta coincidencia exacta por CP; si falla, busca por los primeros 4 dígitos (`LIKE '1234%'`).
+**Importación:** acepta CSV, XLSX o JSON desde el panel admin. La búsqueda primero intenta coincidencia exacta de CP; si falla, busca por los primeros 4 dígitos (`LIKE '1234%'`).
 
 ---
 
-## Panel de administración
+## Configuración disponible
 
-**Ruta:** WooCommerce → Cotizador (`/wp-admin/admin.php?page=silversea-tarifas`)
-
-### Configuración disponible
+**Ruta:** Cotizador → Configuración
 
 | Opción (`wp_options`) | Default | Descripción |
 |-----------------------|---------|-------------|
-| `silversea_demo_mode` | `0` | Usa precios ficticios en vez de la BD |
-| `silversea_descarga_modo` | `contenedor` | `contenedor` = precio por contenedor; `camion` = precio por camión (igual que sin descarga) |
+| `silversea_demo_mode` | `0` | Usa precios ficticios sin consultar la BD |
+| `silversea_descarga_modo` | `contenedor` | `contenedor` = precio por contenedor; `camion` = precio por camión |
 | `silversea_demo_price_sin` | `786.60` | Precio demo sin descarga (por camión) |
-| `silversea_demo_price_c20` | `1644.00` | Precio demo con descarga contenedor 20' |
-| `silversea_demo_price_c40` | `1765.28` | Precio demo con descarga contenedor 40' |
-| `silversea_extra_truck_cost` | `1350.00` | Costo adicional por cada camión 2+ en modo "con descarga" |
-| `silversea_admin_email` | admin email | Destino de emails en modo debug/demo |
-| `silversea_email_send_client` | `0` | Si enviar copia al cliente al enviar la cotización |
-| `silversea_email_show_prices` | `0` | Si mostrar precios de envío en el email al cliente |
-| `silversea_require_quote` | `0` | Si requerir cotización de envío antes de permitir enviar el formulario |
-| `silversea_show_consolidated` | `1` | Si mostrar el widget cotizador en la página de selección |
+| `silversea_demo_price_c20` | `1644.00` | Precio demo con descarga 20' |
+| `silversea_demo_price_c40` | `1765.28` | Precio demo con descarga 40' |
+| `silversea_extra_truck_cost` | `1350.00` | Surcharge por camión 2+ en modo "con descarga" |
+| `silversea_sales_email` | *(vacío)* | Email de ventas al que se envían las cotizaciones. **Si está vacío, no se envían emails** — solo se guardan en el panel |
+| `silversea_admin_email` | admin email | Destino de emails en modo demo/debug |
+| `silversea_email_send_client` | `0` | Si enviar copia al cliente |
+| `silversea_email_show_prices` | `1` | Si mostrar precios en el email al cliente |
+| `silversea_show_front` | `0` | Si mostrar el precio calculado al cliente en el front |
+| `silversea_require_quote` | `0` | Si requerir cotización antes de poder agregar al carrito |
+| `silversea_show_consolidated` | `1` | Si mostrar el widget consolidado en "Mi selección" |
+
+> **Importante:** configurar `silversea_sales_email` antes de salir a producción, de lo contrario las cotizaciones se guardan pero no se envían por email.
+
+---
+
+## Ciudades / Depósitos
+
+**Ruta:** Cotizador → Configuración → sección "🏙️ Ciudades / Depósitos"
+
+Cada depósito puede habilitarse para uno o dos modos:
+
+- **Entrega:** el cliente recibe el contenedor a domicilio (requiere tarifas importadas en la BD).
+- **Retiro:** el cliente retira en el depósito (sin costo de transporte).
+
+La configuración se guarda en la opción `silversea_cities_config`. Si la opción no existe, se usan los valores por defecto definidos en `silversea_default_cities()`.
+
+### Helpers disponibles
+
+```php
+silversea_get_cities()                // Todas las ciudades con sus modos configurados
+silversea_get_cities_for_mode($mode)  // Solo ciudades habilitadas para 'delivery' o 'pickup'
+silversea_get_city_keys($mode)        // Solo los slugs (para validación)
+silversea_origin_label($key)          // 'barcelona' → 'Barcelona'
+```
 
 ---
 
 ## Widget del cotizador
 
-**Archivo JS:** `assets/js/shipping-calculator.js`  
-**Archivo CSS:** `assets/css/shipping-calculator.css`  
-**Renderizado PHP:** `includes/shipping-calculator.php` (función `silversea_shipping_calculator_shortcode`)  
-**Shortcode:** `[silversea_shipping_calculator]`
+**Shortcode:** `[silversea_shipping mode="single"]` o `[silversea_shipping mode="consolidated"]`
+
+**Modos:**
+- `single` — en páginas de producto individual. Muestra cantidad, selector de color RAL (si aplica), y cotizador.
+- `consolidated` — en la página "Mi selección". Calcula el envío para todos los productos del carrito.
 
 ### Paneles
 
-El widget tiene dos modos que el usuario puede alternar:
+| Panel | Método | Descripción |
+|-------|--------|-------------|
+| Retiro | `pickup` | Ciudad de retiro (depósitos con modo pickup). Sin costo. |
+| Entrega | `delivery` | Ciudad de salida + CP destino + tipo transporte (sin/con descarga). |
 
-- **Retiro en almacén** (`method=pickup`): Selecciona ciudad (Barcelona, Madrid, Madrid 2, Valencia). Envío gratuito. Plazo: 5 días hábiles.
-- **Entrega a domicilio** (`method=delivery`): Selecciona ciudad de origen + código postal de destino + tipo de transporte (sin/con descarga).
+### Aviso de volumen
 
-### Campos
-
-```
-Origen:       [Barcelona ▼]
-Código postal: [28001___]
-Transporte:   (●) Sin descarga   ( ) Con descarga
-              [Calcular envío]
-```
-
-### Flujo JS
-
-1. `scRestorePrefs()` — al cargar la página, recupera la última selección desde cookie (`sc_prefs`) y rellena los campos. No dispara el cálculo automático.
-2. `scCalculate()` — llama al AJAX handler `silversea_calc_shipping` con los campos actuales, muestra el resultado.
-3. Al confirmar (`scSaveShipping()`), llama al AJAX handler `silversea_save_shipping` para guardar la sesión y redirige a la página del formulario.
-4. Si la URL contiene `?sc_recalc=1` (inyectado por "Actualizar lista") y el método guardado era `delivery`, dispara `scCalculate()` automáticamente y limpia el parámetro con `history.replaceState()`.
+En modo `single`, se muestra un banner azul: _"¿Necesitas más de 7 contenedores? → sales@silverseacontainers.com"_
 
 ### AJAX handlers
 
-| Action | Handler PHP | Descripción |
-|--------|-------------|-------------|
-| `silversea_calc_shipping` | `silversea_ajax_calc_shipping()` | Calcula y devuelve HTML de resultado |
-| `silversea_save_shipping` | `silversea_ajax_save_shipping()` | Guarda datos en WC Session |
+| Action | Handler | Descripción |
+|--------|---------|-------------|
+| `silversea_calc_shipping` | `silversea_shipping_ajax_calc()` | Cálculo single |
+| `silversea_calc_consolidated` | `silversea_shipping_ajax_calc_consolidated()` | Cálculo consolidado |
+| `silversea_save_shipping` | `silversea_ajax_save_shipping()` | Guarda en WC Session |
+
+### Validación de color (productos variables)
+
+Si el producto es variable con atributo `pa_color-ral`, el widget muestra un selector de color dentro del cotizador (clon del select nativo de WC). Si `silversea_require_quote = 1`, el botón "Añadir a selección" queda bloqueado hasta calcular el envío. El botón también queda bloqueado si el usuario no seleccionó color.
+
+---
+
+## Galería de colores
+
+**Archivo:** `assets/js/color-gallery.js`  
+**Activado en:** páginas de producto variable con atributo `pa_color-ral`
+
+Al seleccionar un color en el dropdown de variaciones, el gallery de WooCommerce filtra las imágenes:
+- **Sin color seleccionado:** se muestran todas las imágenes.
+- **Con color seleccionado:** solo se muestran las imágenes de ese color; las del resto de variaciones y las genéricas del producto se ocultan.
+
+### Cómo funciona
+
+El PHP inyecta `data-sc-image-id` en cada slide/thumbnail del gallery. Al cargar la página, el JS construye un mapa `colorSlug → [imageIds]` y lo usa para mostrar/ocultar slides y thumbnails.
+
+### Agregar más imágenes por color
+
+Por defecto cada variación tiene **una imagen** (la de la variación). Para agregar más imágenes a un color:
+
+1. Subir las imágenes adicionales a la **galería del producto** (no a la imagen principal).
+2. Editar cada imagen en la **Biblioteca de medios → campo "Texto alternativo"**.
+3. Escribir el **slug exacto del color** (ej. `ral-9016-blanco`). El slug es el que aparece en la URL del atributo de WooCommerce.
 
 ---
 
@@ -141,129 +213,179 @@ Transporte:   (●) Sin descarga   ( ) Con descarga
 
 **Archivo:** `includes/shipping-quote-calc.php`
 
-### Constantes y helpers
-
-```php
-SILVERSEA_ORIGINS  // ['barcelona', 'madrid', 'madrid2', 'valencia']
-
-silversea_origin_label($origin)
-// 'madrid2' → 'Madrid 2', otros → ucfirst()
-
-silversea_get_product_size(WC_Product $product): int
-// Prioridad: pa_tamano taxonomy → padre (si es variation) → título del producto → 20 (default)
-
-silversea_raq_to_items_detail($raq_content): array
-// Devuelve ['items' => [...], 'total_units' => int]
-// Cada item: ['name', 'size', 'quantity', 'units']
-
-silversea_build_truck_list($items_detail): array
-// Construye lista de camiones óptima (ver reglas abajo)
-
-silversea_truck_label($truck): string
-// Ejemplo: "2×20' + 1×10'"
-
-silversea_build_truck_breakdown($truck_list, $transport, $descarga_modo, ...): array
-// Devuelve ['breakdown' => [...], 'total' => float]
-```
-
 ### Reglas de carga (camiones)
 
-Un camión tiene capacidad de **4 unidades**:
-- Contenedor 40' = 4 unidades → ocupa un camión completo solo
+Capacidad por camión: **4 unidades**
+- Contenedor 40' = 4 unidades (camión completo solo)
 - Contenedor 20' = 2 unidades
 - Contenedor 10' = 1 unidad
 
-Los 40' siempre van solos. Los 20' y 10' se combinan en orden hasta llenar cada camión.
-
-**Ejemplo:** 3×40' + 4×20' = 3 camiones (uno por cada 40') + 2 camiones (4 unidades de 20' cada uno) = **5 camiones**.
+Los 40' siempre van solos. Los 20' y 10' se combinan hasta llenar cada camión.
 
 ### Reglas de precio (con descarga)
 
-- **Camión 1:** se cobra por contenedor individual (`p_c20` o `p_c40`). Excepción: si el camión está lleno (4u) sin 40', se aplica tarifa equivalente a 40' (`p_c40`).
-- **Camiones 2+:** se cobra `p_sin + p_extra_truck` (sin grúa + surcharge).
-- Si `descarga_modo === 'camion'`: todos los camiones se cobran al precio sin descarga (`p_sin`), independientemente del modo de transporte seleccionado.
+- **Camión 1:** se cobra por contenedor individual (`p_c20` o `p_c40`). Si el camión está lleno (4u) sin 40', se aplica tarifa equivalente a 40'.
+- **Camiones 2+:** se cobra `p_sin + p_extra_truck`.
+- Si `descarga_modo = camion`: todos los camiones al precio sin descarga.
 
-### Estimación de días de entrega
+### Estimación de días
 
-Basada en kilómetros de la fila de tarifas:
-```
-< 200 km  → 2–3 días hábiles
-< 500 km  → 3–5 días hábiles
-< 800 km  → 5–7 días hábiles
-≥ 800 km  → 7–10 días hábiles
-```
-
-### Función principal
-
-```php
-silversea_calc_consolidated_shipping($raq_content, $origin, $cp, $transport)
-// Devuelve array con: total, trucks, total_units, transport, transp_label,
-//                     origin, cp, destino, breakdown, items_detail, days, km, descarga_modo
-// O WP_Error si falla validación o no hay tarifa.
-```
+| Kilómetros | Plazo |
+|-----------|-------|
+| ≤ 100 km | 2 días hábiles |
+| ≤ 300 km | 3 días hábiles |
+| ≤ 600 km | 4 días hábiles |
+| > 600 km | 5 días hábiles |
 
 ---
 
 ## Sesión y persistencia
 
-**Archivo:** `includes/shipping-session.php`
-
-Los datos de envío elegidos se guardan en la sesión de WooCommerce (`WC()->session`), clave `silversea_shipping_data`:
+Los datos de envío elegidos se guardan en `WC()->session` con clave `silversea_shipping_data`:
 
 ```php
 [
     'method'      => 'delivery' | 'pickup',
-    'origin'      => 'barcelona' | 'madrid' | 'madrid2' | 'valencia',
+    'origin'      => 'barcelona' | 'madrid' | ...,
     'postal_code' => '28001',
     'transport'   => 'sin' | 'con',
-    'pickup_city' => 'barcelona' | ...,
+    'pickup_city' => 'bilbao' | ...,
     'price'       => 786.60,
-    'detail'      => 'string HTML del resumen',
+    'detail'      => 'string de resumen',
     'trucks'      => 2,
     'days'        => 5,
 ]
 ```
 
-La sesión se **limpia automáticamente** cuando el usuario hace click en "Actualizar lista" en la página YWRAQ, forzando recalcular el envío con los nuevos productos.
+Las preferencias de UI (ciudad, CP, transporte) también se guardan en cookie `sc_prefs` (365 días) para pre-rellenar el widget en visitas futuras, **sin** disparar el cálculo automático.
 
 ---
 
 ## CPT silversea_quote
 
-**Archivo:** `includes/shipping-session.php`
+Post type privado `silversea_quote`. Cada cotización enviada genera un registro.
 
-Post type privado `silversea_quote` que guarda cada cotización enviada.
-
-### Meta fields guardados
+### Meta fields
 
 | Meta key | Contenido |
 |----------|-----------|
 | `_sq_name` | Nombre del cliente |
-| `_sq_email` | Email del cliente |
-| `_sq_phone` | Teléfono |
+| `_sq_email` | Email |
+| `_sq_phone` | Teléfono (prefijo + número) |
 | `_sq_client_type` | `particular` \| `empresa` |
-| `_sq_products` | JSON array de productos (`name`, `qty`) |
+| `_sq_city` | Ciudad del cliente |
+| `_sq_postal` | CP del cliente |
+| `_sq_message` | Mensaje libre |
+| `_sq_products` | JSON: `[{name, condition, qty, addons, color}]` |
 | `_sq_shipping_method` | `delivery` \| `pickup` |
-| `_sq_shipping_origin` | Ciudad de origen |
-| `_sq_shipping_cp` | Código postal de destino |
-| `_sq_shipping_pickup` | Ciudad de retiro (si método es pickup) |
+| `_sq_shipping_origin` | Ciudad de origen del envío |
+| `_sq_shipping_cp` | CP de destino |
+| `_sq_shipping_transport` | `sin` \| `con` |
+| `_sq_shipping_pickup` | Ciudad de retiro |
 | `_sq_shipping_price` | Precio total de envío |
-| `_sq_breakdown` | JSON del desglose por camión |
+| `_sq_shipping_trucks` | Número de camiones |
+| `_sq_shipping_days` | Días de entrega estimados |
+| `_sq_shipping_breakdown` | JSON del desglose por camión |
 | `_sq_email_body_sales` | HTML del email enviado a ventas |
 | `_sq_email_body_client` | HTML del email enviado al cliente |
+| `_sq_sf_payload` | Array del payload enviado a Salesforce |
+| `_sq_sf_status` | `success` \| `error` |
+| `_sq_sf_response_code` | Código HTTP de la respuesta (200 / 302) |
+| `_sq_sf_sent_at` | Timestamp del envío |
+| `_sq_sf_error` | Mensaje de error (si falló) |
 
 ---
 
 ## Emails
 
-**Archivo:** `includes/shipping-session.php`
+**Hook:** `ywraq_process`  
+**Función:** `silversea_process_and_save()`
 
-Al enviar el formulario de cotización YWRAQ se disparan (hook `yith_ywraq_after_send_request`):
+Al enviar el formulario de cotización se disparan:
 
-1. **Email a ventas** → `comercial-eu@silverseacontainers.com` (o `silversea_admin_email` en modo demo). Siempre incluye precios de envío y desglose completo.
-2. **Email al cliente** → dirección ingresada en el formulario. Solo se envía si `silversea_email_send_client = 1`. Los precios se incluyen solo si `silversea_email_show_prices = 1`.
+1. **Email a ventas** → dirección configurada en `silversea_sales_email`. Si el campo está vacío, **no se envía** — la cotización queda guardada en el panel para enviarla manualmente con el botón "Reenviar". En modo demo, se redirige al email de debug.
+2. **Email al cliente** → dirección ingresada en el formulario. Solo si `silversea_email_send_client = 1` **y** hay email de ventas configurado.
 
-Ambos emails se guardan como meta del CPT `silversea_quote` y son visibles en el panel admin con botón para reenviar.
+Ambos emails se guardan como meta del CPT y se pueden **editar y reenviar** desde el panel de cada cotización.
+
+---
+
+## Integración Salesforce
+
+**Archivo:** `includes/salesforce.php`  
+**Endpoint:** `https://webto.salesforce.com/servlet/servlet.WebToLead`  
+**OID:** `00D8a000002A8Hp`
+
+### Activación
+
+Se ejecuta automáticamente al procesar cada cotización (`ywraq_process`), después de guardar el CPT y enviar los emails.
+
+### Campos enviados (Web-to-Lead)
+
+| Campo Salesforce | Valor |
+|-----------------|-------|
+| `lead_source` | `Web` (fijo) |
+| `00N8a00000FXdRj` — Market | `Europe` (fijo) |
+| `00N8a00000FXdRt` — Modality | `Buy` (fijo) |
+| `00N8a00000FXdRZ` — ContainerType | Ver lógica abajo |
+| `00N8a00000FXdRo` — Quantity | Ver lógica abajo |
+| `first_name` / `last_name` | Del formulario. Para empresas: `last_name = nombre de empresa` |
+| `company` | Solo si el cliente es empresa |
+| `email`, `phone`, `city`, `zip` | Del formulario |
+| `description` | Detalle completo del carrito (ver formato abajo) |
+
+### Lógica ContainerType / Quantity
+
+```
+Si el carrito tiene 1 solo tipo de contenedor:
+    ContainerType = tipo del item (del mapeo)
+    Quantity      = cantidad del item
+
+Si el carrito tiene 2 o más tipos diferentes:
+    ContainerType = vacío
+    Quantity      = suma total de unidades
+
+Description = SIEMPRE:
+    "Pedido del cotizador:
+     - 40' High Cube x3
+     - 20' Dry Van x2
+
+     Mensaje del cliente: [texto]"
+```
+
+### Mapeo Producto → ContainerType
+
+Se configura desde **Cotizador → Salesforce** (página de mapeo en lote).
+
+| Producto en la web | ContainerType en Salesforce |
+|--------------------|----------------------------|
+| 20' Pies Estándar (nuevo, usado, RAL 9003, RAL 9010) | `20' Dry Van` |
+| 40' Pies Estándar (nuevo, usado) | `40' Dry Van` |
+| 10' Pies | `10' Dry Van` |
+| 20' Pies High Cube (nuevo, usado) | `20' High Cube` |
+| 40' Pies High Cube (nuevo, usado, todos los RAL) | `40' High Cube` |
+| 40' Pies High Cube NOR | `40' High Cube NOR` |
+| 40' Pies NOR | `40' NOR` |
+| 20' Pies Refrigerado (nuevo, usado) | `20' Reefer` |
+| 40' Pies Refrigerado (nuevo, usado) | `40' Reefer` |
+| 20' Pies Open Top (nuevo, usado) | `20' Open Top` |
+| 40' Pies Open Top (nuevo, usado, RAL 5010, RAL 5013) | `40' Open Top` |
+| 20' Pies Doble Puerta (todos los RAL, EOS-1015) | `20' Double Door` |
+| 40' Pies High Cube Doble Puerta (todos los RAL) | `40' HC Double Door` |
+| 40' HC Full Open Side | `40' HC Open Side` |
+| 40' HC Open Side 4 Doors | `40' HC Open Side 4 Doors` |
+
+> El mapeo se guarda como post meta `silversea_sf_container_type` en el producto padre. Las variaciones (colores, condición) heredan el tipo del padre automáticamente.
+
+### Panel Salesforce en cada cotización
+
+Cada registro del CPT `silversea_quote` muestra un panel lateral "☁️ Salesforce" con:
+- Estado: ✓ Enviado (verde) o ✗ Error (rojo) con el código HTTP
+- Fecha y hora del envío
+- Datos enviados (desplegable)
+- Botón **Re-enviar** (o **Enviar** para cotizaciones anteriores a la integración)
+
+Para cotizaciones anteriores a la integración, el payload se reconstruye automáticamente desde los meta guardados (`_sq_name`, `_sq_email`, `_sq_products`, etc.).
 
 ---
 
@@ -271,84 +393,96 @@ Ambos emails se guardan como meta del CPT `silversea_quote` y son visibles en el
 
 **Archivo:** `includes/shipping-quote-pages.php`
 
-### `[silversea_quote_view form_page='slug-del-formulario']`
-
-Widget completo para la página de "Mi selección" (carrito YWRAQ). Muestra:
-- Resumen de la cotización de envío calculada (si existe en sesión)
-- Opciones de extras WAPO (si hay productos con add-ons)
-- Link "Recalcular" que despliega/colapsa el widget calculador inline
-- Link "Cancelar" que revierte el widget al estado anterior
-
-Parámetro `form_page`: slug de la página del formulario de cotización (donde está el shortcode `[yith_ywraq_request_quote]`). Se usa para el botón "Continuar".
+### `[silversea_quote_view form_page='slug']`
+Widget completo para la página de "Mi selección". Muestra resumen de envío, extras WAPO y widget cotizador inline.
 
 ### `[silversea_quote_form]`
-
-Muestra el resumen de envío dentro de la página del formulario de cotización (antes de enviar). Recupera datos de la sesión.
+Resumen de envío dentro de la página del formulario.
 
 ### `[silversea_quote_thanks]`
-
-Muestra el resumen de envío en la página de confirmación post-envío.
-
-### Helper interno
-
-```php
-silversea_get_raq_content(): array
-// Obtiene el contenido del carrito YWRAQ desde el objeto YITH_Request_Quote
-// o como fallback desde la sesión YITH directamente.
-```
+Resumen en la página de confirmación post-envío.
 
 ---
 
 ## Extras (YITH WAPO)
 
-Los productos pueden tener opciones adicionales (seguros, pintura, etc.) definidas en YITH Product Add-Ons.
+Los productos pueden tener opciones adicionales definidas en YITH Product Add-Ons. El widget los muestra como tarjetas visuales sincronizadas con los inputs nativos de WAPO.
 
-El widget muestra estas opciones como tarjetas visuales (`sc-extras-grid`) dentro del panel de la página "Mi selección". Las tarjetas se renderizan en **ambos paneles** (retiro y entrega) con estado sincronizado:
+---
 
-- `querySelectorAll('.sc-extras-grid')` — localiza todas las instancias
-- `selectedValues = {}` — objeto compartido de estado entre grids
-- `syncAllCards(value, isSelected)` — actualiza todas las tarjetas matching en todos los grids simultáneamente
-- Al confirmar, los extras seleccionados se incluyen en la sesión y en los emails
+## Herramientas admin de productos
+
+### € Precios (`Cotizador → € Precios`)
+
+Editor masivo de precios para todos los productos y sus variaciones. Los productos variables se expanden/colapsan para editar cada variación individualmente.
+
+### ↕ Ordenar (`Cotizador → ↕ Ordenar`)
+
+Reordenador drag & drop por categoría o búsqueda. Modifica el campo `menu_order`, que Elementor usa cuando el orden está configurado como "Orden del menú".
+
+### Salesforce (`Cotizador → Salesforce`)
+
+Tabla de todos los productos con un dropdown de ContainerType por fila. Las filas modificadas se resaltan en amarillo. El botón **Guardar mapeo** actualiza todos los productos a la vez vía AJAX.
+
+### ⬇ Exportar contenedores
+
+Botón en la cabecera de **Cotizador → Configuración**. Descarga un CSV con los siguientes campos para todos los productos (publicados, borradores y privados):
+
+| Columna | Fuente |
+|---------|--------|
+| Contenedor | Título del producto |
+| SKU | SKU |
+| Colores RAL | Términos de `pa_color-ral` (todos los asignados) |
+| Precio | Regular price (simple) o rango min–max (variable) |
+| Categoría Salesforce | Meta `silversea_sf_container_type` |
+| Tamaño | Términos de `pa_tamano` |
+| Condición | Términos de `pa_condicion` |
+| Tipo | Categorías `para-transporte` y/o `para-almacenaje` |
+| Estado | Publicado / Borrador / Privado / Pendiente |
+| Orden | `menu_order` |
+
+> El archivo usa separador `;` y BOM UTF-8 para apertura directa en Excel (España).
 
 ---
 
 ## Flujo completo del usuario
 
 ```
-1. Usuario navega el catálogo y agrega contenedores a "Mi solicitud" (YWRAQ)
+1. Usuario navega el catálogo
    ↓
-2. Accede a la página "Mi selección" → shortcode [silversea_quote_view]
+2. En la ficha de producto:
+   - Selecciona color RAL (dropdown)
+   - Ajusta cantidad
+   - Cotiza el envío (opcional si silversea_require_quote=0)
+   - Hace clic en "Añadir a selección" (YITH RAQ)
    ↓
-3. Widget cotizador: selecciona origen, CP, tipo de transporte → "Calcular envío"
+3. Accede a "Mi selección" → [silversea_quote_view]
    ↓
-4. JS llama AJAX silversea_calc_shipping → PHP devuelve resultado HTML
+4. Cotiza el envío consolidado o por producto
    ↓
-5. Usuario confirma → JS llama AJAX silversea_save_shipping → guarda en WC Session
+5. Pasa al formulario de cotización → [yith_ywraq_request_quote]
    ↓
-6. Redirige a página del formulario → [yith_ywraq_request_quote] + [silversea_quote_form]
+6. Completa datos y envía
    ↓
-7. Usuario completa datos y envía
+7. hook ywraq_process → silversea_process_and_save():
+   - Crea CPT silversea_quote
+   - Envía email a ventas (si silversea_sales_email configurado)
+   - Envía email al cliente (si silversea_email_send_client=1)
+   - Envía lead a Salesforce Web-to-Lead
    ↓
-8. Hook yith_ywraq_after_send_request → crea CPT silversea_quote + envía emails
-   ↓
-9. Redirige a página de gracias → [silversea_quote_thanks]
+8. Redirige a página de gracias → [silversea_quote_thanks]
 ```
-
-**Actualizar lista:** Si el usuario modifica cantidades en "Mi selección" y hace click en "Actualizar lista" (formulario YWRAQ `update_raq`), el filter `wp_redirect` detecta el submit, limpia la sesión de envío e inyecta `?sc_recalc=1` en la URL de redirección. Al cargar la página, el JS detecta ese parámetro y dispara `scCalculate()` automáticamente.
 
 ---
 
 ## Modo demo
 
-Activar en: WooCommerce → Cotizador → ☑ Modo demo
+Activar en: Cotizador → Configuración → ☑ Modo demo
 
-Cuando está activo:
-- No consulta la BD de tarifas
-- Usa los precios configurados en el panel admin
+En modo demo:
+- No consulta la BD de tarifas, usa los precios configurados
 - El destino se muestra como `"CP XXXXX (DEMO)"`
-- Los labels de camiones incluyen `"(DEMO)"`
-- `km = 0`, `days = 5`
-- Los emails se envían al `silversea_admin_email` en vez del cliente/ventas real
+- Todos los emails se envían a `silversea_admin_email`
 
 **Desactivar antes de salir a producción.**
 
@@ -361,14 +495,25 @@ Ruta remota: `public_html/wp-content/plugins/silversea/`
 
 ### Archivos que se modifican con frecuencia
 
-| Archivo local | Descripción |
-|---------------|-------------|
-| `includes/shipping-calculator.php` | Widget PHP, AJAX, admin |
-| `includes/shipping-quote-calc.php` | Lógica de cálculo |
+| Archivo | Descripción |
+|---------|-------------|
+| `silversea.php` | Color gallery (PHP), columnas admin, banderas |
+| `includes/shipping-calculator.php` | Widget PHP, AJAX, menú admin, exportación |
+| `includes/shipping-quote-calc.php` | Lógica de cálculo, helpers de ciudades |
 | `includes/shipping-session.php` | Sesión, CPT, emails |
 | `includes/shipping-quote-pages.php` | Shortcodes página selección |
+| `includes/salesforce.php` | Integración Salesforce completa |
 | `assets/js/shipping-calculator.js` | Widget JS frontend |
+| `assets/js/color-gallery.js` | Filtro de galería por color |
 | `assets/css/shipping-calculator.css` | Estilos widget |
 | `assets/css/silversea-raq.css` | Estilos página selección |
 
-> Después de subir cambios en JS o CSS, limpiar cualquier caché de WP (WP Rocket, etc.) para que los visitantes reciban los archivos actualizados.
+> Después de subir cambios en JS o CSS, limpiar caché de WP (WP Rocket, etc.).
+
+### Checklist antes de poner en producción
+
+- [ ] `silversea_demo_mode` = **desactivado**
+- [ ] `silversea_sales_email` = email de ventas real configurado
+- [ ] Cotizador → Salesforce: todos los productos mapeados
+- [ ] Cotizador → Ciudades: modos delivery/pickup configurados correctamente
+- [ ] Tarifas importadas para todas las ciudades de entrega

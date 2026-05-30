@@ -7,6 +7,7 @@
 if ( ! defined( 'ABSPATH' ) ) exit;
 
 require_once __DIR__ . '/shipping-quote-calc.php';
+require_once __DIR__ . '/salesforce.php';
 
 /* ══════════════════════════════════════════════════════════════
    1.  GUARDAR datos de envío en WC Session vía AJAX
@@ -70,7 +71,7 @@ function silversea_register_quote_cpt() {
         'show_ui'           => true,
         'show_in_menu'      => true,
         'menu_icon'         => 'dashicons-clipboard',
-        'menu_position'     => 30,
+        'menu_position'     => 57,
         'supports'          => ['title'],
         'capability_type'   => 'post',
         'has_archive'       => false,
@@ -755,6 +756,9 @@ function silversea_process_and_save( $args ) {
             'raq_content' => $raq_content,
         ]);
     }
+
+    /* Enviar lead a Salesforce */
+    silversea_send_to_salesforce( $d, $products, $quote_id ?: 0 );
 }
 
 
@@ -823,17 +827,17 @@ function silversea_email_products_html_from_meta( $post_id, $show_prices ) {
                . (int)$qty . ' × ' . esc_html($name) . $price_html . '</p>';
 
         if ( $tamano )
-            $html .= '<p style="margin:2px 0;font-size:13px;color:#6b7280;">📦 ' . esc_html($tamano) . '</p>';
+            $html .= '<p style="margin:2px 0;font-size:13px;color:#6b7280;">' . esc_html($tamano) . '</p>';
         if ( $condicion )
-            $html .= '<p style="margin:2px 0;font-size:13px;color:#6b7280;">🔧 Condición: ' . esc_html($condicion) . '</p>';
+            $html .= '<p style="margin:2px 0;font-size:13px;color:#6b7280;">' . esc_html($condicion) . '</p>';
         $color = $item['color'] ?? '';
         if ( $color )
-            $html .= '<p style="margin:2px 0;font-size:13px;color:#6b7280;">🎨 ' . esc_html($color) . '</p>';
+            $html .= '<p style="margin:2px 0;font-size:13px;color:#6b7280;">' . esc_html($color) . '</p>';
         if ( $desc )
             $html .= '<p style="margin:4px 0;font-size:13px;color:#374151;font-style:italic;">' . esc_html($desc) . '</p>';
 
         foreach ( $addons as $addon ) {
-            $html .= '<span class="ad" style="display:inline-block;margin:3px 4px 0 0;font-size:12px;color:#6d28d9;background:#f5f3ff;padding:2px 8px;border-radius:4px;">➕ ' . esc_html($addon) . '</span>';
+            $html .= '<span class="ad" style="display:inline-block;margin:3px 4px 0 0;font-size:12px;color:#fff;background:#222E5C;padding:2px 8px;border-radius:4px;">+ ' . esc_html($addon) . '</span>';
         }
 
         $html .= '</div>';
@@ -893,16 +897,16 @@ function silversea_email_products_html( $raq_content, $show_prices ) {
                . (int)$qty . ' × ' . esc_html($title) . $price_html . '</p>';
 
         if ( $tamano )
-            $html .= '<p class="pm" style="margin:2px 0;font-size:13px;color:#6b7280;">📦 ' . esc_html($tamano) . '</p>';
+            $html .= '<p class="pm" style="margin:2px 0;font-size:13px;color:#6b7280;">' . esc_html($tamano) . '</p>';
         if ( $condicion )
-            $html .= '<p class="pm" style="margin:2px 0;font-size:13px;color:#6b7280;">🔧 ' . esc_html($condicion) . '</p>';
+            $html .= '<p class="pm" style="margin:2px 0;font-size:13px;color:#6b7280;">' . esc_html($condicion) . '</p>';
         if ( $color_attr )
-            $html .= '<p class="pm" style="margin:2px 0;font-size:13px;color:#6b7280;">🎨 ' . esc_html($color_attr) . '</p>';
+            $html .= '<p class="pm" style="margin:2px 0;font-size:13px;color:#6b7280;">' . esc_html($color_attr) . '</p>';
         if ( $description )
             $html .= '<p class="pd" style="margin:4px 0;font-size:13px;color:#374151;font-style:italic;">' . esc_html($description) . '</p>';
 
         foreach ( $addons as $addon ) {
-            $html .= '<span class="ad" style="display:inline-block;margin:3px 4px 0 0;font-size:12px;color:#6d28d9;background:#f5f3ff;padding:2px 8px;border-radius:4px;">➕ ' . esc_html($addon) . '</span>';
+            $html .= '<span class="ad" style="display:inline-block;margin:3px 4px 0 0;font-size:12px;color:#fff;background:#222E5C;padding:2px 8px;border-radius:4px;">+ ' . esc_html($addon) . '</span>';
         }
 
         $html .= '</div>';
@@ -1042,7 +1046,7 @@ function silversea_email_template( $quote_id, $data, $products_html, $shipping_h
     $s .= '.pb{padding:12px 0;border-bottom:1px solid #f3f4f6;} .pb:last-child{border-bottom:none;}';
     $s .= '.pn{margin:0 0 4px;font-size:15px;font-weight:600;color:#111;}';
     $s .= '.pm{margin:2px 0;font-size:13px;color:#6b7280;} .pd{margin:4px 0;font-size:13px;color:#374151;font-style:italic;}';
-    $s .= '.ad{display:inline-block;margin:3px 4px 0 0;font-size:12px;color:#6d28d9;background:#f5f3ff;padding:2px 8px;border-radius:4px;}';
+    $s .= '.ad{display:inline-block;margin:3px 4px 0 0;font-size:12px;color:#fff;background:#222E5C;padding:2px 8px;border-radius:4px;}';
     $s .= '.tb{background:#f8fafc;border-radius:8px;padding:16px 20px;}';
     $s .= '.tl{font-size:14px;font-weight:600;color:#0F2557;margin:0 0 3px;} .td{font-size:13px;color:#374151;margin:0;}';
     $s .= '.tot{background:#0F2557;padding:20px 32px;} .tot table{width:100%;}';
@@ -1096,7 +1100,7 @@ function silversea_send_admin_email( $quote_id, $data ) {
     $show_prices  = get_option('silversea_email_show_prices', '1') === '1';
 
     $email_from      = 'sales@silverseacontainers.com';
-    $email_comercial = 'comercial-eu@silverseacontainers.com';
+    $email_comercial = get_option('silversea_sales_email', '');
     $email_debug     = get_option('silversea_admin_email', get_option('admin_email'));
 
     $subject_sales  = sprintf('[Silversea Ventas] Nueva cotización #%d – %s', $quote_id, $data['name']);
@@ -1129,10 +1133,14 @@ function silversea_send_admin_email( $quote_id, $data ) {
     update_post_meta( $quote_id, '_sq_email_body_sales', $body_sales );
 
     $to_sales = $debug_mode ? $email_debug : $email_comercial;
-    wp_mail( $to_sales, $subject_sales, $body_sales, $headers_base );
+    if ( $to_sales ) {
+        wp_mail( $to_sales, $subject_sales, $body_sales, $headers_base );
+    }
+    /* Si no hay email configurado: el body queda guardado en el CPT
+       para enviarlo manualmente desde el panel de cotizaciones. */
 
-    /* ── Email cliente (opcional) ── */
-    if ( $send_client && $data['email'] ) {
+    /* ── Email cliente (opcional) — solo si también hay email de ventas configurado ── */
+    if ( $send_client && $data['email'] && $to_sales ) {
         $to_client = $debug_mode ? $email_debug : $data['email'];
 
         $products_html_client = ! empty($raq)
@@ -1239,11 +1247,16 @@ function silversea_inject_addons_to_raq() {
     $modified = false;
     foreach ( $yith->raq_content as $key => &$raq ) {
         $pid = (int) $raq['product_id'];
-        if ( ! isset( $silversea_pending_addons[ $pid ] ) ) continue;
+        $vid = (int) ( $raq['variation_id'] ?? 0 );
+        /* Buscar addons primero por variation_id (productos variables),
+           luego por product_id (productos simples). */
+        $lookup_key = isset( $silversea_pending_addons[ $vid ] ) ? $vid
+                    : ( isset( $silversea_pending_addons[ $pid ] ) ? $pid : null );
+        if ( $lookup_key === null ) continue;
         if ( isset( $raq['silversea_addons'] ) ) continue;
 
-        $raq['silversea_addons'] = $silversea_pending_addons[ $pid ];
-        unset( $silversea_pending_addons[ $pid ] );
+        $raq['silversea_addons'] = $silversea_pending_addons[ $lookup_key ];
+        unset( $silversea_pending_addons[ $lookup_key ] );
         $modified = true;
     }
     unset( $raq );

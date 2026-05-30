@@ -57,6 +57,7 @@ add_action( 'admin_init', function () {
         'silversea_extra_truck_cost',
         'silversea_show_front',
         'silversea_admin_email',
+        'silversea_sales_email',
         'silversea_email_send_client',
         'silversea_email_show_prices',
         'silversea_require_quote',
@@ -69,8 +70,25 @@ add_action( 'admin_init', function () {
 add_action( 'admin_menu', 'silversea_shipping_admin_menu' );
 
 function silversea_shipping_admin_menu() {
-    add_submenu_page( 'woocommerce', 'Silversea – Cotizador', 'Cotizador',
-        'manage_woocommerce', 'silversea-tarifas', 'silversea_shipping_admin_page' );
+    /* Menú top-level */
+    add_menu_page(
+        'Silversea – Cotizador',
+        'Cotizador',
+        'manage_woocommerce',
+        'silversea-cotizador',
+        'silversea_shipping_admin_page',
+        'dashicons-money-alt',
+        56
+    );
+    /* Primer submenú (mismo slug = renombra el ítem duplicado que WP agrega) */
+    add_submenu_page(
+        'silversea-cotizador',
+        'Silversea – Configuración',
+        'Configuración',
+        'manage_woocommerce',
+        'silversea-cotizador',
+        'silversea_shipping_admin_page'
+    );
 }
 
 /* ══ 4. PÁGINA ADMIN ══════════════════════════════════════ */
@@ -148,7 +166,14 @@ function silversea_shipping_admin_page() {
     $ej_camion     = number_format($ej_trucks*(float)$p_sin,2,',','.');
     ?>
     <div class="wrap">
-    <h1>Silversea – Cotizador</h1>
+    <h1 style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;">
+      Silversea – Cotizador
+      <a href="<?php echo esc_url( wp_nonce_url( admin_url('admin-post.php?action=silversea_export_products'), 'silversea_export_products' ) ); ?>"
+         class="button"
+         style="font-size:13px;font-weight:500;display:flex;align-items:center;gap:6px;">
+        ⬇ Exportar contenedores (.csv)
+      </a>
+    </h1>
     <?php if($message): ?><div class="notice notice-success"><p><?php echo $message; ?></p></div><?php endif; ?>
     <?php if($error): ?><div class="notice notice-error"><p><?php echo esc_html($error); ?></p></div><?php endif; ?>
 
@@ -197,6 +222,13 @@ function silversea_shipping_admin_page() {
             </label>
           </div>
           <p class="description" style="margin-top:8px;">Solo afectan el modo demo.</p>
+        </td>
+      </tr>
+      <tr>
+        <th style="padding:12px 0;">Email de ventas</th>
+        <td>
+          <input type="email" name="silversea_sales_email" value="<?php echo esc_attr( get_option('silversea_sales_email', '') ); ?>" style="width:280px;" class="regular-text" placeholder="comercial@ejemplo.com">
+          <p class="description">Dirección a la que se envían las cotizaciones. <strong>Si está vacío, los emails no se envían</strong> — las cotizaciones solo se guardan en el panel para enviarlas manualmente después.</p>
         </td>
       </tr>
       <tr>
@@ -901,3 +933,102 @@ add_action('wp_footer', function() {
 
 require_once __DIR__ . '/shipping-session.php';
 require_once __DIR__ . '/shipping-quote-pages.php';
+
+/* ══════════════════════════════════════════════════════════════
+   EXPORTAR CONTENEDORES — descarga CSV con atributos completos
+══════════════════════════════════════════════════════════════ */
+
+add_action( 'admin_post_silversea_export_products', 'silversea_handle_export_products' );
+
+function silversea_handle_export_products() {
+    if ( ! current_user_can('manage_woocommerce') ) wp_die( 'No autorizado.', 403 );
+    if ( ! wp_verify_nonce( $_GET['_wpnonce'] ?? '', 'silversea_export_products' ) ) wp_die( 'Nonce inválido.' );
+
+    $products = get_posts( [
+        'post_type'      => 'product',
+        'post_status'    => [ 'publish', 'draft', 'private', 'pending' ],
+        'posts_per_page' => -1,
+        'orderby'        => [ 'menu_order' => 'ASC', 'title' => 'ASC' ],
+    ] );
+
+    /* ── Headers HTTP para descarga ── */
+    header( 'Content-Type: text/csv; charset=UTF-8' );
+    header( 'Content-Disposition: attachment; filename="contenedores-' . date('Y-m-d') . '.csv"' );
+    header( 'Pragma: no-cache' );
+    header( 'Expires: 0' );
+
+    /* BOM para que Excel abra correctamente en UTF-8 */
+    echo "\xEF\xBB\xBF";
+
+    $out = fopen( 'php://output', 'w' );
+
+    /* Cabeceras del CSV */
+    fputcsv( $out, [
+        'Contenedor',
+        'SKU',
+        'Colores RAL',
+        'Precio',
+        'Categoría Salesforce',
+        'Tamaño',
+        'Condición',
+        'Tipo',
+        'Estado',
+        'Orden',
+    ], ';' );
+
+    $status_labels = [
+        'publish' => 'Publicado',
+        'draft'   => 'Borrador',
+        'private' => 'Privado',
+        'pending' => 'Pendiente',
+    ];
+
+    foreach ( $products as $post ) {
+        $product = wc_get_product( $post->ID );
+        if ( ! $product ) continue;
+
+        $is_var = $product->is_type( 'variable' );
+
+        /* Colores RAL — términos asignados al producto (simple o variable) */
+        $color_terms = wc_get_product_terms( $post->ID, 'pa_color-ral', [ 'fields' => 'names' ] );
+        $colors      = implode( ', ', $color_terms );
+
+        /* Precio */
+        if ( $is_var ) {
+            $min   = $product->get_variation_price( 'min' );
+            $max   = $product->get_variation_price( 'max' );
+            $price = ( $min == $max ) ? $min : $min . ' – ' . $max;
+        } else {
+            $price = $product->get_regular_price();
+        }
+
+        /* Atributos de taxonomía */
+        $tamano    = implode( ', ', wc_get_product_terms( $post->ID, 'pa_tamano',    [ 'fields' => 'names' ] ) );
+        $condicion = implode( ', ', wc_get_product_terms( $post->ID, 'pa_condicion', [ 'fields' => 'names' ] ) );
+
+        /* Tipo — categorías WC "para-transporte" y/o "para-almacenaje" */
+        $tipos = [];
+        if ( has_term( 'para-transporte', 'product_cat', $post->ID ) ) $tipos[] = 'Para transporte';
+        if ( has_term( 'para-almacenaje', 'product_cat', $post->ID ) ) $tipos[] = 'Para almacenaje';
+        $tipo = implode( ', ', $tipos );
+
+        /* Categoría Salesforce */
+        $sf_type = get_post_meta( $post->ID, 'silversea_sf_container_type', true );
+
+        fputcsv( $out, [
+            $post->post_title,
+            $product->get_sku(),
+            $colors,
+            $price,
+            $sf_type,
+            $tamano,
+            $condicion,
+            $tipo,
+            $status_labels[ $post->post_status ] ?? $post->post_status,
+            $post->menu_order,
+        ], ';' );
+    }
+
+    fclose( $out );
+    exit;
+}

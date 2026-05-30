@@ -913,20 +913,20 @@ add_shortcode('badge_usado', function() {
  */
 add_action( 'admin_menu', function() {
     add_submenu_page(
-        'edit.php?post_type=product',
-        'Ordenar Productos',
-        '↕ Ordenar',
-        'manage_woocommerce',
-        'silversea-product-order',
-        'silversea_render_product_order_page'
-    );
-    add_submenu_page(
-        'edit.php?post_type=product',
+        'silversea-cotizador',
         'Editar Precios',
         '€ Precios',
         'manage_woocommerce',
         'silversea-product-prices',
         'silversea_render_product_prices_page'
+    );
+    add_submenu_page(
+        'silversea-cotizador',
+        'Ordenar Productos',
+        '↕ Ordenar',
+        'manage_woocommerce',
+        'silversea-product-order',
+        'silversea_render_product_order_page'
     );
 } );
 
