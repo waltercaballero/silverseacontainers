@@ -208,7 +208,7 @@ function silversea_shortcode_quote_form( $atts ) {
 
             <?php /* - Listado informativo de productos - */ ?>
             <div class="silversea-form-product-summary">
-                <h3 class="silversea-form-summary-title">Tu Solicitud</h3>
+                <h3 class="silversea-form-summary-title">Su solicitud</h3>
                 <?php echo silversea_render_product_list($raq_content, false); ?>
             </div>
 
@@ -222,7 +222,7 @@ function silversea_shortcode_quote_form( $atts ) {
                 if ( $sc_method === 'pickup' ) {
                     $pickup_city   = $sc_shipping['pickup_city'] ?? '';
                     $pickup_label  = silversea_origin_label( $pickup_city );
-                    $shipping_desc = 'Retiro en dep&oacute;sito - ' . $pickup_label;
+                    $shipping_desc = 'Recogida en dep&oacute;sito - ' . $pickup_label;
                 } else {
                     $sc_origin     = $sc_shipping['origin'] ?? '';
                     $origin_label  = silversea_origin_label( $sc_origin );
@@ -269,14 +269,14 @@ function silversea_shortcode_quote_form( $atts ) {
             <?php else : ?>
             <div class="silversea-already-quoted">
                 <div class="silversea-already-quoted-icon"></div>
-                <p class="silversea-already-quoted-title">Tu solicitud ya fue enviada</p>
-                <p class="silversea-already-quoted-sub">En breve recibiri&aacute;s un correo con todos los detalles.</p>
+                <p class="silversea-already-quoted-title">Su solicitud ya fue enviada</p>
+                <p class="silversea-already-quoted-sub">En breve recibir&aacute; un correo con todos los detalles.</p>
             </div>
             <?php endif; ?>
 
         <?php else : ?>
             <div class="silversea-raq-empty">
-                <p>No hay productos en tu selecci&oacute;n.</p>
+                <p>No hay productos en su selecci&oacute;n.</p>
                 <?php if ( $view_url ) : ?>
                     <a href="<?php echo esc_url($view_url); ?>" class="silversea-btn-outline">
                         Ver mi selecci&oacute;n
@@ -343,7 +343,7 @@ function silversea_shortcode_thanks( $atts ) {
 
             <?php /* - Resumen de la orden - */ ?>
             <div class="silversea-thanks-section">
-                <h3 class="silversea-thanks-section-title">Resumen De La Orden</h3>
+                <h3 class="silversea-thanks-section-title">Resumen del pedido</h3>
                 <div class="silversea-product-list">
 
                 <?php if ( ! $use_products_array && ! empty($raq_content) ) :
@@ -457,6 +457,6 @@ add_action( 'wp_enqueue_scripts', function () {
     wp_enqueue_style(
         'silversea-raq',
         SILVERSEA_PLUGIN_URL . 'assets/css/silversea-raq.css',
-        [], '1.2.0'
+        [], SILVERSEA_VERSION
     );
 } );

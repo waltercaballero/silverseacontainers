@@ -88,6 +88,95 @@ function silversea_get_city( $key ) {
 }
 
 /**
+ * Precio de un producto para una ciudad específica.
+ * Busca en el meta _silversea_city_prices del producto padre.
+ * Devuelve float o null si no hay precio configurado para esa ciudad.
+ */
+function silversea_get_product_city_price( $product_id, $city ) {
+    if ( ! $product_id || ! $city ) return null;
+
+    $product = wc_get_product( $product_id );
+    if ( ! $product ) return null;
+
+    /* Para variaciones usar el precio del padre */
+    $lookup_id = $product->is_type('variation') ? $product->get_parent_id() : $product_id;
+
+    $raw    = get_post_meta( $lookup_id, '_silversea_city_prices', true );
+    $prices = $raw ? json_decode( $raw, true ) : [];
+
+    if ( ! empty( $prices[ $city ] ) && is_numeric( $prices[ $city ] ) ) {
+        return (float) $prices[ $city ];
+    }
+    return null;
+}
+
+/**
+ * Normaliza un código postal español a 5 dígitos.
+ * Los CP españoles tienen siempre 5 dígitos; si el cliente omite el cero
+ * inicial (ej. "8758") se completa a "08758".
+ *
+ * @return string CP de 5 dígitos, o '' si es inválido.
+ */
+function silversea_normalize_cp( $cp ) {
+    $cp = preg_replace( '/\D/', '', (string) $cp );
+    if ( strlen( $cp ) === 4 ) $cp = '0' . $cp;
+    return strlen( $cp ) === 5 ? $cp : '';
+}
+
+/**
+ * Busca la fila de tarifa para una ciudad + CP.
+ * Maneja la inconsistencia de ceros a la izquierda: prueba el CP normalizado
+ * (08758) y la forma sin cero inicial (8758), por si los datos se importaron
+ * desde Excel/CSV que elimina el cero. NO hace match por prefijo aproximado.
+ *
+ * @return array|null Fila ARRAY_A o null si no existe tarifa exacta.
+ */
+function silversea_find_tarifa_row( $origin, $cp5 ) {
+    global $wpdb;
+    $table   = $wpdb->prefix . 'silversea_tarifas';
+    $cp_alt  = ltrim( $cp5, '0' ); // forma sin cero(s) inicial(es)
+    return $wpdb->get_row( $wpdb->prepare(
+        "SELECT * FROM {$table} WHERE ciudad_origen=%s AND cp_destino IN (%s,%s) LIMIT 1",
+        $origin, $cp5, $cp_alt
+    ), ARRAY_A );
+}
+
+/**
+ * Resuelve el ID de un producto por su título exacto.
+ * Usa una consulta directa para evitar la ambigüedad de wc_get_products('name'),
+ * que filtra por slug y no por título.
+ */
+function silversea_get_product_id_by_title( $title ) {
+    if ( ! $title ) return 0;
+    global $wpdb;
+    $id = $wpdb->get_var( $wpdb->prepare(
+        "SELECT ID FROM {$wpdb->posts}
+         WHERE post_title = %s AND post_type IN ('product','product_variation')
+           AND post_status = 'publish'
+         ORDER BY ID ASC LIMIT 1",
+        $title
+    ) );
+    return (int) $id;
+}
+
+/**
+ * Devuelve el WC_Product de un item guardado en _sq_products.
+ * Prioriza product_id (cotizaciones nuevas); como fallback busca por título
+ * exacto (cotizaciones anteriores que no guardaban el ID).
+ *
+ * @param array $item Item con 'product_id' (opcional) y 'name'.
+ * @return WC_Product|null
+ */
+function silversea_resolve_quote_product( $item ) {
+    if ( ! empty( $item['product_id'] ) ) {
+        $p = wc_get_product( (int) $item['product_id'] );
+        if ( $p ) return $p;
+    }
+    $id = silversea_get_product_id_by_title( $item['name'] ?? '' );
+    return $id ? wc_get_product( $id ) : null;
+}
+
+/**
  * Nombre corto para mostrar en emails, reportes, etc.
  * Ej: 'madrid2' → 'Madrid 2', 'bilbao' → 'Bilbao'.
  */
@@ -277,27 +366,14 @@ function silversea_calc_consolidated_shipping( $raq_content, $origin, $cp, $tran
     if ( ! in_array( $origin, silversea_get_city_keys('delivery'), true ) )
         return new WP_Error( 'invalid_origin', 'Ciudad de origen inválida.' );
 
-    $cp = preg_replace( '/\D/', '', $cp );
-    if ( strlen($cp) < 4 || strlen($cp) > 5 )
-        return new WP_Error( 'invalid_cp', 'Código postal inválido.' );
+    $cp = silversea_normalize_cp( $cp );
+    if ( ! $cp )
+        return new WP_Error( 'invalid_cp', 'Código postal inválido. Debe tener 5 dígitos.' );
 
     if ( get_option( 'silversea_demo_mode', '0' ) === '1' )
         return silversea_calc_consolidated_demo( $raq_content, $origin, $cp, $transport );
 
-    global $wpdb;
-    $table = $wpdb->prefix . 'silversea_tarifas';
-
-    $row = $wpdb->get_row( $wpdb->prepare(
-        "SELECT * FROM {$table} WHERE ciudad_origen=%s AND cp_destino=%s LIMIT 1",
-        $origin, $cp
-    ), ARRAY_A );
-
-    if ( ! $row ) {
-        $row = $wpdb->get_row( $wpdb->prepare(
-            "SELECT * FROM {$table} WHERE ciudad_origen=%s AND cp_destino LIKE %s LIMIT 1",
-            $origin, substr($cp,0,4).'%'
-        ), ARRAY_A );
-    }
+    $row = silversea_find_tarifa_row( $origin, $cp );
     if ( ! $row )
         return new WP_Error( 'no_tarifa',
             'No encontramos tarifa para CP ' . $cp . ' desde ' . silversea_origin_label($origin) . '.'

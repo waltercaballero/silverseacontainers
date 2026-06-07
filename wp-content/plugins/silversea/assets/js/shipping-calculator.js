@@ -145,6 +145,7 @@
     else { info.classList.add("sc-hidden"); contBtn.classList.add("sc-hidden"); }
     scShowDeposito(city, "scDepositoInfo");
     scSavePrefs();
+    if (window.scUpdateProductPrice) window.scUpdateProductPrice(city);
   };
 
   window.scContinue = function () {
@@ -157,7 +158,7 @@
     /* Sincronizar hidden fields del form de cotización */
     scSyncFormFields({ method: "pickup", origin: "", cp: "", transport: "", price: 0, pickup: city });
     var btn = document.getElementById("scContinueBtn");
-    btn.textContent = "\u2713 Retiro guardado"; btn.disabled = true; btn.style.background = "#1D9E75";
+    btn.textContent = "\u2713 Recogida guardada"; btn.disabled = true; btn.style.background = "#1D9E75";
   };
 
   /*  ENTREGA  */
@@ -174,9 +175,10 @@
     var tip = document.getElementById("scTransportTip"); var tipText = document.getElementById("scTransportTipText");
     scShowDeposito(origin, "scDepositoInfoDelivery");
     scSavePrefs();
+    if (window.scUpdateProductPrice) window.scUpdateProductPrice(origin);
     if (origin && postal.length >= 4) {
       tip.classList.remove("sc-hidden");
-      tipText.innerHTML = "Recomendamos <strong>sin descarga</strong> si dispon\u00e9s de medios propios en destino (precio menor). Eleg\u00ed <strong>con descarga</strong> si necesit\u00e1s que el cami\u00f3n incluya gr\u00faa.";
+      tipText.innerHTML = "Recomendamos <strong>sin descarga</strong> si dispone de medios propios en destino (precio menor). Elija <strong>con descarga</strong> si necesita que el cami\u00f3n incluya gr\u00faa.";
     } else tip.classList.add("sc-hidden");
     scClearResult();
   };
@@ -224,7 +226,7 @@
       area.classList.remove("sc-hidden");
       priceEl.className = "sc-result-free";
       priceEl.textContent = "✓ Cotización guardada";
-      detailEl.textContent = "Recibirás el detalle por email.";
+      detailEl.textContent = "Recibirá el detalle por email.";
       breakEl.classList.add("sc-hidden");
       daysEl.classList.add("sc-hidden");
     }
@@ -390,9 +392,41 @@
   function scValidate() {
     var origin = document.getElementById("scOriginCity").value;
     var postal = document.getElementById("scPostalCode").value;
-    if (!origin) { scShowError("Por favor seleccion\u00e1 la ciudad de salida."); return false; }
-    if (!postal || postal.length < 4) { scShowError("Ingres\u00e1 un c\u00f3digo postal v\u00e1lido (m\u00ednimo 4 d\u00edgitos)."); return false; }
+    if (!origin) { scShowError("Por favor, seleccione la ciudad de salida."); return false; }
+    if (!postal || postal.length < 5) { scShowError("Introduzca un c\u00f3digo postal v\u00e1lido (5 d\u00edgitos)."); return false; }
     return true;
+  }
+
+  /*  ENVÍO AJAX ROBUSTO — distingue fallo de red de respuesta corrupta  */
+  function scSendCalc(url, fd) {
+    var httpStatus = 0;
+    fetch(url, { method: "POST", body: fd })
+      .then(function (r) {
+        httpStatus = r.status;
+        return r.text();
+      })
+      .then(function (text) {
+        var data;
+        try {
+          data = JSON.parse(text);
+        } catch (e) {
+          /* El servidor devolvió algo que no es JSON (warning PHP, HTML de error, etc.) */
+          console.error("[Silversea] Respuesta no-JSON del servidor (HTTP " + httpStatus + "):\n" + text);
+          scShowError("El servidor devolvió una respuesta inesperada. Recargue la página e inténtelo de nuevo.");
+          return;
+        }
+        if (data && data.success) {
+          scShowResult(data.data);
+        } else {
+          scShowError(data && data.data && data.data.message
+            ? data.data.message
+            : "Error al calcular. Inténtelo de nuevo.");
+        }
+      })
+      .catch(function (err) {
+        console.error("[Silversea] Falló la conexión AJAX:", err);
+        scShowError("Error de conexión. Inténtelo de nuevo.");
+      });
   }
 
   /*  CALCULAR  */
@@ -426,10 +460,7 @@
       };
       var ajaxUrl2 = typeof silvSea !== "undefined" ? silvSea.ajaxUrl : "/wp-admin/admin-ajax.php";
       var fd2 = new FormData(); Object.keys(payload).forEach(function (k) { fd2.append(k, payload[k]); });
-      fetch(ajaxUrl2, { method: "POST", body: fd2 })
-        .then(function (r) { return r.json(); })
-        .then(function (data) { if (data.success) scShowResult(data.data); else scShowError(data.data && data.data.message ? data.data.message : "Error al calcular. Intent\u00e1 nuevamente."); })
-        .catch(function () { scShowError("Error de conexi\u00f3n. Intent\u00e1 nuevamente."); });
+      scSendCalc(ajaxUrl2, fd2);
       return;
     }
     /* Real single */
@@ -441,10 +472,7 @@
     };
     var ajaxUrl = typeof silvSea !== "undefined" ? silvSea.ajaxUrl : "/wp-admin/admin-ajax.php";
     var formData = new FormData(); Object.keys(payload).forEach(function (k) { formData.append(k, payload[k]); });
-    fetch(ajaxUrl, { method: "POST", body: formData })
-      .then(function (r) { return r.json(); })
-      .then(function (data) { if (data.success) scShowResult(data.data); else scShowError(data.data && data.data.message ? data.data.message : "Error al calcular. Intent\u00e1 nuevamente."); })
-      .catch(function () { scShowError("Error de conexi\u00f3n. Intent\u00e1 nuevamente."); });
+    scSendCalc(ajaxUrl, formData);
   };
 
 })();
@@ -576,7 +604,7 @@ function scShowDeposito(city, infoId) {
       + 'background:#0F2557;color:#fff;padding:14px 24px;border-radius:10px;'
       + 'font-size:14px;font-weight:500;z-index:99999;box-shadow:0 4px 16px rgba(0,0,0,.2);'
       + 'max-width:90vw;text-align:center;';
-    msg.textContent = 'Cotizá el envío antes de agregar este contenedor a tu selección.';
+    msg.textContent = 'Cotice el envío antes de añadir este contenedor a su selección.';
     document.body.appendChild(msg);
 
     setTimeout(function() { if ( msg.parentNode ) msg.remove(); }, 3500);
@@ -591,6 +619,29 @@ function scShowDeposito(city, infoId) {
     : { type: 'none', label: '' };
 
   if (colorData.type === 'none') return;
+
+  /* USADO variable: ocultar la tabla de variaciones nativa y auto-seleccionar
+     la primera variación disponible, para que el producto sea agregable sin
+     mostrar selector de color (el color es aleatorio). */
+  if (colorData.type === 'variable_hidden') {
+    document.addEventListener('DOMContentLoaded', function () {
+      var table = document.querySelector('table.variations');
+      if (table) table.style.display = 'none';
+
+      var sel = document.querySelector('select[name="attribute_pa_color-ral"]');
+      if (sel) {
+        var chosen = '';
+        for (var i = 0; i < sel.options.length; i++) {
+          if (sel.options[i].value) { chosen = sel.options[i].value; break; }
+        }
+        if (chosen) {
+          sel.value = chosen;
+          sel.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+      }
+    });
+    return;
+  }
 
   document.addEventListener('DOMContentLoaded', function () {
     var qtyRow = document.querySelector('.sc-qty-row');
@@ -841,11 +892,117 @@ function scShowDeposito(city, infoId) {
       + 'background:#dc2626;color:#fff;padding:14px 24px;border-radius:10px;'
       + 'font-size:14px;font-weight:500;z-index:99999;box-shadow:0 4px 16px rgba(0,0,0,.2);'
       + 'max-width:90vw;text-align:center;';
-    msg.textContent = 'Seleccioná un color RAL antes de añadir a tu selección.';
+    msg.textContent = 'Seleccione un color RAL antes de añadir a su selección.';
     document.body.appendChild(msg);
     setTimeout(function () { if (msg.parentNode) msg.remove(); }, 3500);
   }
 })();
 
 
+/* ── AUTOCOMPLETE DE CÓDIGO POSTAL ───────────────────────────
+   Sugiere los CP cargados para la ciudad de origen seleccionada.
+   Sirve también para ver qué códigos existen en la base.
+──────────────────────────────────────────────────────────── */
+(function () {
+  document.addEventListener('DOMContentLoaded', function () {
+    var cpInput   = document.getElementById('scPostalCode');
+    var originSel = document.getElementById('scOriginCity');
+    if (!cpInput || !originSel || typeof silvSea === 'undefined') return;
+
+    var list = document.createElement('datalist');
+    list.id = 'scCpList';
+    document.body.appendChild(list);
+    cpInput.setAttribute('list', 'scCpList');
+    cpInput.setAttribute('autocomplete', 'off');
+
+    var timer = null;
+
+    cpInput.addEventListener('input', function () {
+      var origin = originSel.value;
+      var term   = cpInput.value.replace(/\D/g, '');
+      if (!origin || term.length < 2) { list.innerHTML = ''; return; }
+      clearTimeout(timer);
+      timer = setTimeout(function () { fetchSuggest(origin, term); }, 250);
+    });
+
+    /* Si cambia la ciudad, limpiar sugerencias previas */
+    originSel.addEventListener('change', function () { list.innerHTML = ''; });
+
+    function fetchSuggest(origin, term) {
+      var fd = new FormData();
+      fd.append('action', 'silversea_cp_suggest');
+      fd.append('nonce', silvSea.nonce);
+      fd.append('origin', origin);
+      fd.append('term', term);
+      fetch(silvSea.ajaxUrl, { method: 'POST', body: fd })
+        .then(function (r) { return r.json(); })
+        .then(function (res) {
+          if (!res || !res.success || !Array.isArray(res.data)) { list.innerHTML = ''; return; }
+          list.innerHTML = res.data.map(function (row) {
+            var label = row.municipio_destino
+              ? (row.cp_destino + ' — ' + row.municipio_destino)
+              : row.cp_destino;
+            return '<option value="' + row.cp_destino + '">' + label + '</option>';
+          }).join('');
+        })
+        .catch(function () { /* silencioso */ });
+    }
+  });
+})();
+
 /* Filtrado de galería por color — manejado por color-gallery.js */
+
+/* ── PRECIO DINÁMICO POR CIUDAD ──────────────────────────────
+   Actualiza el precio del producto en la página cuando el usuario
+   selecciona una ciudad en el cotizador.
+──────────────────────────────────────────────────────────── */
+(function () {
+  var cityPrices = (typeof silvSea !== 'undefined' && silvSea.productCityPrices)
+    ? silvSea.productCityPrices : {};
+
+  if ( ! Object.keys(cityPrices).length ) return;
+
+  var $ = typeof jQuery !== 'undefined' ? jQuery : null;
+
+  function formatPrice(value) {
+    return parseFloat(value).toLocaleString('es-ES', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2
+    });
+  }
+
+  function applyPrice(city) {
+    if ( ! city || ! cityPrices[city] ) return;
+    var price = parseFloat(cityPrices[city]);
+    if ( isNaN(price) ) return;
+
+    var html = '<span class="woocommerce-Price-amount amount">'
+             + '<bdi><span class="woocommerce-Price-currencySymbol">€ </span>'
+             + formatPrice(price) + '</bdi></span>';
+
+    /* Actualizar el elemento de precio de WooCommerce */
+    var $price = $ ? $('form.cart').closest('.product').find('.price').first()
+                   : document.querySelector('.product .price');
+
+    if ( $ && $price.length ) {
+      $price.html(html).attr('data-sc-city', city);
+    } else if ( $price ) {
+      $price.innerHTML  = html;
+      $price.dataset.scCity = city;
+    }
+  }
+
+  /* Exponer para que el cotizador llame al cambiar ciudad */
+  window.scUpdateProductPrice = applyPrice;
+
+  /* Re-aplicar cuando WC actualiza el precio al seleccionar variación */
+  if ( $ ) {
+    $(function() {
+      $('form.cart').on('found_variation', function() {
+        var $price = $('form.cart').closest('.product').find('.price').first();
+        var city   = $price.attr('data-sc-city');
+        if ( city ) setTimeout(function() { applyPrice(city); }, 20);
+      });
+    });
+  }
+})();

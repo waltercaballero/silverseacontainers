@@ -32,14 +32,19 @@ Plugin WordPress personalizado para Silversea Containers. Integra un cotizador d
 
 ```
 wp-content/plugins/silversea/
-├── silversea.php                          # Plugin principal: includes, color gallery,
-│                                          # selector de países/banderas, columnas admin
+├── silversea.php                          # Bootstrap: banderas/países, traducción de menús,
+│                                          # form Salesforce de Elementor. Al final: require cotizador.php
+├── cotizador.php                          # Núcleo del cotizador: requiere shipping-calculator.php,
+│                                          # shortcodes (product_count, badge_usado), menús Precios/Ordenar,
+│                                          # columna SKU/Color, color gallery (PHP)
 ├── includes/
-│   ├── shipping-calculator.php            # Tabla BD, menú admin, página config, AJAX calc,
-│   │                                      # enqueue JS/CSS, exportación CSV de productos
-│   ├── shipping-quote-calc.php            # Funciones de cálculo puro (sin WP output),
-│   │                                      # helpers de ciudades/depósitos
-│   ├── shipping-session.php               # AJAX save-shipping, CPT silversea_quote, emails
+│   ├── shipping-calculator.php            # Constantes, tabla BD, menú admin "Cotizador", página config,
+│   │                                      # AJAX calc + autocomplete CP, precios por ciudad, export CSV.
+│   │                                      # Al final: require shipping-session.php + shipping-quote-pages.php
+│   ├── shipping-quote-calc.php            # Cálculo puro (sin WP output), helpers de ciudades/depósitos,
+│   │                                      # normalización de CP, resolución de productos
+│   ├── shipping-session.php               # AJAX save-shipping, CPT silversea_quote, emails.
+│   │                                      # Al inicio: require shipping-quote-calc.php + salesforce.php
 │   ├── shipping-quote-pages.php           # Shortcodes de la página YWRAQ
 │   └── salesforce.php                     # Integración Salesforce Web-to-Lead:
 │                                          # envío, mapeo de tipos, página de mapeo en lote,
@@ -276,7 +281,7 @@ Post type privado `silversea_quote`. Cada cotización enviada genera un registro
 | `_sq_city` | Ciudad del cliente |
 | `_sq_postal` | CP del cliente |
 | `_sq_message` | Mensaje libre |
-| `_sq_products` | JSON: `[{name, condition, qty, addons, color}]` |
+| `_sq_products` | JSON: `[{name, product_id, condition, qty, addons, color, price, city}]` |
 | `_sq_shipping_method` | `delivery` \| `pickup` |
 | `_sq_shipping_origin` | Ciudad de origen del envío |
 | `_sq_shipping_cp` | CP de destino |
@@ -468,7 +473,7 @@ Botón en la cabecera de **Cotizador → Configuración**. Descarga un CSV con l
    - Crea CPT silversea_quote
    - Envía email a ventas (si silversea_sales_email configurado)
    - Envía email al cliente (si silversea_email_send_client=1)
-   - Envía lead a Salesforce Web-to-Lead
+   - Envía lead a Salesforce Web-to-Lead (salvo en modo demo)
    ↓
 8. Redirige a página de gracias → [silversea_quote_thanks]
 ```
@@ -483,6 +488,7 @@ En modo demo:
 - No consulta la BD de tarifas, usa los precios configurados
 - El destino se muestra como `"CP XXXXX (DEMO)"`
 - Todos los emails se envían a `silversea_admin_email`
+- **No se envían leads a Salesforce** automáticamente (el panel marca la cotización como "No enviado (demo)"). El botón "Enviar a Salesforce" del panel sí funciona manualmente.
 
 **Desactivar antes de salir a producción.**
 
@@ -493,12 +499,17 @@ En modo demo:
 Servidor: FTP Silversea (credenciales en FileZilla)  
 Ruta remota: `public_html/wp-content/plugins/silversea/`
 
+### Versionado de assets (cache-busting)
+
+Todos los CSS/JS se encolan con la constante **`SILVERSEA_VERSION`** (definida en `includes/shipping-calculator.php`). Al modificar cualquier archivo de `assets/`, **subí ese número** y los visitantes reciben la versión nueva sin depender de la caché. No hace falta tocar cada `wp_enqueue_*` por separado.
+
 ### Archivos que se modifican con frecuencia
 
 | Archivo | Descripción |
 |---------|-------------|
-| `silversea.php` | Color gallery (PHP), columnas admin, banderas |
-| `includes/shipping-calculator.php` | Widget PHP, AJAX, menú admin, exportación |
+| `silversea.php` | Bootstrap, banderas, form Salesforce de Elementor |
+| `cotizador.php` | Shortcodes, menús Precios/Ordenar, columna SKU, color gallery (PHP) |
+| `includes/shipping-calculator.php` | Widget PHP, AJAX, menú admin, exportación, `SILVERSEA_VERSION` |
 | `includes/shipping-quote-calc.php` | Lógica de cálculo, helpers de ciudades |
 | `includes/shipping-session.php` | Sesión, CPT, emails |
 | `includes/shipping-quote-pages.php` | Shortcodes página selección |

@@ -37,16 +37,21 @@ function silversea_sf_container_types() {
 }
 
 /* ══════════════════════════════════════════════════════════════
-   HELPER — obtener ContainerType de un producto por su nombre.
-   Lee el meta 'silversea_sf_container_type' guardado desde la
-   página de mapeo. Si no tiene valor asignado, devuelve vacío.
+   HELPERS — obtener el ContainerType mapeado de un producto.
+   El meta 'silversea_sf_container_type' se guarda en el producto padre.
 ══════════════════════════════════════════════════════════════ */
 
-function silversea_sf_container_type( $product_name ) {
-    $found = wc_get_products( [ 'name' => $product_name, 'limit' => 1 ] );
-    if ( empty( $found ) ) return '';
-    $value = get_post_meta( $found[0]->get_id(), 'silversea_sf_container_type', true );
+/** Devuelve el tipo SF a partir de un objeto WC_Product (o su padre si es variación). */
+function silversea_sf_type_for_product( $product ) {
+    if ( ! $product ) return '';
+    $lookup_id = $product->is_type('variation') ? $product->get_parent_id() : $product->get_id();
+    $value     = get_post_meta( $lookup_id, 'silversea_sf_container_type', true );
     return $value ? (string) $value : '';
+}
+
+/** Devuelve el tipo SF de un item guardado en _sq_products (por product_id o título). */
+function silversea_sf_type_for_item( $item ) {
+    return silversea_sf_type_for_product( silversea_resolve_quote_product( $item ) );
 }
 
 /* ══════════════════════════════════════════════════════════════
@@ -277,6 +282,13 @@ function silversea_sf_metabox( $post ) {
     /* ── Resumen de estado ── */
     if ( ! $status ) {
         echo '<p style="color:#9ca3af;font-size:13px;margin:0 0 12px;">Aún no se envió a Salesforce.</p>';
+    } elseif ( $status === 'skipped' ) {
+        echo '<div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;">'
+           . '<span style="background:#fffbeb;color:#b45309;font-size:12px;font-weight:600;padding:3px 10px;border-radius:20px;">⏸ No enviado (demo)</span>'
+           . '</div>';
+        if ( $error ) {
+            echo '<p style="font-size:12px;color:#92740a;margin:0 0 12px;">' . esc_html($error) . '</p>';
+        }
     } elseif ( $status === 'success' ) {
         echo '<div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;">'
            . '<span style="background:#f0fdf4;color:#15803d;font-size:12px;font-weight:600;padding:3px 10px;border-radius:20px;">✓ Enviado</span>'
@@ -339,6 +351,37 @@ function silversea_sf_metabox( $post ) {
        . '</a>';
 }
 
+/**
+ * Calcula ContainerType y Quantity para el lead a partir de los productos.
+ *
+ * ContainerType solo se asigna si TODOS los productos del carrito mapean
+ * al MISMO tipo de Salesforce. Si hay productos sin mapear o tipos mixtos,
+ * queda vacío (el detalle siempre llega en Description). Quantity es la
+ * suma total de unidades en todos los casos.
+ *
+ * @param array $products Cada item con keys 'name' y 'qty'.
+ * @return array ['container_type' => string, 'quantity' => int]
+ */
+function silversea_sf_type_and_qty( $products ) {
+    $sf_types     = [];
+    $total_qty    = 0;
+    $any_unmapped = false;
+
+    foreach ( $products as $item ) {
+        $total_qty += (int) ( $item['qty'] ?? 0 );
+        $sf_type    = silversea_sf_type_for_item( $item );
+        if ( $sf_type === '' ) {
+            $any_unmapped = true;
+        } elseif ( ! in_array( $sf_type, $sf_types, true ) ) {
+            $sf_types[] = $sf_type;
+        }
+    }
+
+    $container_type = ( count( $sf_types ) === 1 && ! $any_unmapped ) ? $sf_types[0] : '';
+
+    return [ 'container_type' => $container_type, 'quantity' => $total_qty ];
+}
+
 /* ── Reconstruir payload desde los meta del CPT (para cotizaciones antiguas) ── */
 function silversea_sf_build_payload_from_quote( $quote_id ) {
     $name         = get_post_meta( $quote_id, '_sq_name',        true );
@@ -365,26 +408,14 @@ function silversea_sf_build_payload_from_quote( $quote_id ) {
     }
 
     /* ContainerType y Quantity */
-    $unique_sf_types = [];
-    $total_qty       = 0;
-    foreach ( $products_raw as $item ) {
-        $sf_type    = silversea_sf_container_type( $item['name'] );
-        $display    = $sf_type ?: $item['name'];
-        $total_qty += (int) $item['qty'];
-        if ( ! in_array( $display, $unique_sf_types, true ) ) $unique_sf_types[] = $display;
-    }
-    if ( count( $unique_sf_types ) === 1 ) {
-        $container_type = $unique_sf_types[0];
-        $quantity       = (int) $products_raw[0]['qty'];
-    } else {
-        $container_type = '';
-        $quantity       = $total_qty;
-    }
+    $tq             = silversea_sf_type_and_qty( $products_raw );
+    $container_type = $tq['container_type'];
+    $quantity       = $tq['quantity'];
 
     /* Description */
     $lines = [];
     foreach ( $products_raw as $item ) {
-        $sf_type = silversea_sf_container_type( $item['name'] ) ?: $item['name'];
+        $sf_type = silversea_sf_type_for_item( $item ) ?: $item['name'];
         $lines[] = '- ' . $sf_type . ' x' . (int) $item['qty'];
     }
     $description = "Pedido del cotizador:\n" . implode( "\n", $lines );
@@ -484,6 +515,16 @@ function silversea_sf_do_post( $quote_id, $payload ) {
 function silversea_send_to_salesforce( $d, $products, $quote_id = 0 ) {
     if ( empty( $products ) ) return;
 
+    /* En modo demo no se envían leads reales a Salesforce.
+       El botón "Enviar a Salesforce" del panel sigue funcionando manualmente. */
+    if ( get_option( 'silversea_demo_mode', '0' ) === '1' ) {
+        if ( $quote_id ) {
+            update_post_meta( $quote_id, '_sq_sf_status', 'skipped' );
+            update_post_meta( $quote_id, '_sq_sf_error',  'Modo demo activo: no se envió automáticamente a Salesforce.' );
+        }
+        return;
+    }
+
     /* ── Nombre → first_name / last_name ──────────────────────
        Salesforce requiere last_name obligatoriamente.
        Empresas: company = nombre, last_name = nombre.
@@ -511,30 +552,14 @@ function silversea_send_to_salesforce( $d, $products, $quote_id = 0 ) {
        1 tipo  → ContainerType = ese tipo, Quantity = su cantidad
        2+ tipos → ContainerType = vacío,   Quantity = suma total
     ────────────────────────────────────────────────────────── */
-    $unique_sf_types = [];
-    $total_qty       = 0;
-
-    foreach ( $products as $item ) {
-        $sf_type    = silversea_sf_container_type( $item['name'] );
-        $display    = $sf_type ?: $item['name'];
-        $total_qty += (int) $item['qty'];
-        if ( ! in_array( $display, $unique_sf_types, true ) ) {
-            $unique_sf_types[] = $display;
-        }
-    }
-
-    if ( count( $unique_sf_types ) === 1 ) {
-        $container_type = $unique_sf_types[0];
-        $quantity       = (int) $products[0]['qty'];
-    } else {
-        $container_type = '';
-        $quantity       = $total_qty;
-    }
+    $tq             = silversea_sf_type_and_qty( $products );
+    $container_type = $tq['container_type'];
+    $quantity       = $tq['quantity'];
 
     /* ── Description: detalle completo del carrito ── */
     $lines = [];
     foreach ( $products as $item ) {
-        $sf_type = silversea_sf_container_type( $item['name'] ) ?: $item['name'];
+        $sf_type = silversea_sf_type_for_item( $item ) ?: $item['name'];
         $lines[] = '- ' . $sf_type . ' x' . (int) $item['qty'];
     }
 

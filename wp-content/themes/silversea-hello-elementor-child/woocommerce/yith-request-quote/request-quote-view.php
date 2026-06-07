@@ -8,12 +8,12 @@ if ( isset( $_REQUEST['sent'] ) ) return;
 
 if ( count( $raq_content ) === 0 ) : ?>
     <div class="silversea-raq-empty">
-        <p><?php esc_html_e( 'No hay productos en tu selección.', 'yith-woocommerce-request-a-quote' ); ?></p>
+        <p><?php esc_html_e( 'No hay productos en su selección.', 'yith-woocommerce-request-a-quote' ); ?></p>
         <a href="<?php echo esc_url( home_url('tienda-de-contenedores') ); ?>" class="silversea-btn-outline">Ver contenedores</a>
     </div>
 <?php else :
 
-/*  Addons guardados directamente en el quote cart por silversea_sync_wapo_addons_to_quote()  */
+/*  Addons guardados en el quote cart por silversea_inject_addons_to_raq() (hook yith_raq_updated)  */
 ?>
 <div class="silversea-raq-wrap">
 
@@ -32,7 +32,7 @@ if ( count( $raq_content ) === 0 ) : ?>
                 $_product   = wc_get_product( $product_id );
                 if ( ! $_product || ! is_object($_product) ) continue;
 
-                /*  Addons desde el quote cart (guardados por silversea_sync_wapo_addons_to_quote)  */
+                /*  Addons desde el quote cart (guardados por silversea_inject_addons_to_raq)  */
                 $addons = $raq['silversea_addons'] ?? [];
 
                 /*  Variaciones  */

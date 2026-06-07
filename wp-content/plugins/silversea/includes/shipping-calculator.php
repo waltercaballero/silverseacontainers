@@ -13,6 +13,11 @@ if ( ! defined( 'SILVERSEA_PLUGIN_URL' ) )
 if ( ! defined( 'SILVERSEA_PLUGIN_DIR' ) )
     define( 'SILVERSEA_PLUGIN_DIR', plugin_dir_path( SILVERSEA_PLUGIN_FILE ) );
 
+/* Versión única para cache-busting de todos los assets (JS/CSS).
+   Subir este número cuando se modifique cualquier archivo de assets. */
+if ( ! defined( 'SILVERSEA_VERSION' ) )
+    define( 'SILVERSEA_VERSION', '2.0.0' );
+
 /* ══ 1. TABLA ══════════════════════════════════════════════ */
 
 register_activation_hook( SILVERSEA_PLUGIN_FILE, 'silversea_shipping_create_table' );
@@ -62,6 +67,8 @@ add_action( 'admin_init', function () {
         'silversea_email_show_prices',
         'silversea_require_quote',
         'silversea_show_consolidated',
+        'silversea_catalog_price_mode',
+        'silversea_catalog_price_default_city',
     ] as $key ) register_setting( 'silversea_settings', $key );
 } );
 
@@ -88,6 +95,15 @@ function silversea_shipping_admin_menu() {
         'manage_woocommerce',
         'silversea-cotizador',
         'silversea_shipping_admin_page'
+    );
+    /* Precios por ciudad */
+    add_submenu_page(
+        'silversea-cotizador',
+        'Precios por Ciudad',
+        '🏙 Precios Ciudad',
+        'manage_woocommerce',
+        'silversea-city-prices',
+        'silversea_render_city_prices_page'
     );
 }
 
@@ -291,6 +307,30 @@ function silversea_shipping_admin_page() {
             Obligar a cotizar el envío antes de poder agregar un contenedor a la selección
           </label>
           <p class="description">Si está activo, el botón "Añadir a Selección" no funcionará hasta que el usuario calcule el envío en esa página de producto.</p>
+        </td>
+      </tr>
+      <tr>
+        <th style="padding:12px 0;">Precio en catálogo</th>
+        <td>
+          <?php
+            $cat_mode         = get_option('silversea_catalog_price_mode', 'wc');
+            $cat_default_city = get_option('silversea_catalog_price_default_city', '');
+          ?>
+          <select name="silversea_catalog_price_mode" id="scp-mode" onchange="document.getElementById('scp-city-row').style.display=this.value==='default_city'?'':'none'" style="min-width:320px;">
+            <option value="wc"           <?php selected($cat_mode,'wc'); ?>>Precio de WooCommerce (sin cambios)</option>
+            <option value="min"          <?php selected($cat_mode,'min'); ?>>Desde el precio mínimo entre ciudades</option>
+            <option value="default_city" <?php selected($cat_mode,'default_city'); ?>>Precio de una ciudad específica</option>
+          </select>
+          <div id="scp-city-row" style="margin-top:8px;<?php echo $cat_mode !== 'default_city' ? 'display:none;' : ''; ?>">
+            <select name="silversea_catalog_price_default_city" style="min-width:220px;">
+              <?php foreach ( silversea_get_cities() as $city ) : ?>
+                <option value="<?php echo esc_attr($city['key']); ?>" <?php selected($cat_default_city,$city['key']); ?>>
+                  <?php echo esc_html($city['name']); ?>
+                </option>
+              <?php endforeach; ?>
+            </select>
+          </div>
+          <p class="description">Controla qué precio se muestra en fichas de producto y catálogo cuando hay precios por ciudad configurados. El precio dinámico (según ciudad elegida en el cotizador) siempre tiene prioridad.</p>
         </td>
       </tr>
       <tr>
@@ -526,7 +566,10 @@ function silversea_shipping_import_rows($ciudad,$rows) {
     global $wpdb; $table=$wpdb->prefix.'silversea_tarifas'; $inserted=0; $skipped=0;
     foreach($rows as $r) {
         if(empty($r['cp_destino'])){$skipped++;continue;}
-        $result=$wpdb->replace($table,['ciudad_origen'=>$ciudad,'cp_destino'=>$r['cp_destino'],
+        /* Normalizar a 5 dígitos (Excel/CSV suele eliminar el cero inicial) */
+        $cp_norm = silversea_normalize_cp($r['cp_destino']);
+        if($cp_norm==='') {$skipped++;continue;}
+        $result=$wpdb->replace($table,['ciudad_origen'=>$ciudad,'cp_destino'=>$cp_norm,
             'municipio_destino'=>$r['municipio_destino'],'km'=>$r['km'],
             'precio_sin_descarga'=>$r['precio_sin_descarga'],'precio_con_desc_20'=>$r['precio_con_desc_20'],
             'precio_con_desc_40'=>$r['precio_con_desc_40']],[' %s','%s','%s','%d','%f','%f','%f']);
@@ -573,8 +616,19 @@ function silversea_shipping_shortcode( $atts = [] ) {
             if ( $p ) {
                 $product_size = (string) silversea_get_product_size( $p );
                 $size_label   = $product_size . ' pies';
-                /* Color RAL — variable o simple */
-                if ( $p->is_type('variable') ) {
+                /* Color RAL — variable o simple.
+                   En contenedores USADOS el color es aleatorio: no se muestra
+                   el selector para no confundir al cliente. */
+                $is_usado = has_term( 'usado', 'pa_condicion', $p->get_id() );
+
+                if ( $is_usado ) {
+                    /* Variable usado → ocultar selector y auto-seleccionar variación
+                       para que igual se pueda agregar a la selección.
+                       Simple usado → sin selector. */
+                    $color_info = $p->is_type('variable')
+                        ? ['type' => 'variable_hidden', 'label' => '']
+                        : ['type' => 'none', 'label' => ''];
+                } elseif ( $p->is_type('variable') ) {
                     $color_info = ['type' => 'variable', 'label' => ''];
                 } else {
                     $c_terms    = wc_get_product_terms($p->get_id(), 'pa_color-ral', ['fields' => 'names']);
@@ -618,8 +672,19 @@ function silversea_shipping_shortcode( $atts = [] ) {
         }
     }
 
-    wp_enqueue_style( 'silversea-shipping-calc', SILVERSEA_PLUGIN_URL.'assets/css/shipping-calculator.css', [], '1.5.0');
-    wp_enqueue_script('silversea-shipping-calc', SILVERSEA_PLUGIN_URL.'assets/js/shipping-calculator.js',  ['jquery'], '1.5.0', true);
+    /* Precios por ciudad para el producto actual (solo en modo single) */
+    $city_prices = [];
+    if ( $mode === 'single' && isset($p) && $p ) {
+        $lookup_id   = $p->is_type('variation') ? $p->get_parent_id() : $p->get_id();
+        $raw         = get_post_meta( $lookup_id, '_silversea_city_prices', true );
+        $parsed      = $raw ? json_decode( $raw, true ) : [];
+        foreach ( (array) $parsed as $k => $v ) {
+            if ( is_numeric($v) ) $city_prices[ $k ] = (float) $v;
+        }
+    }
+
+    wp_enqueue_style( 'silversea-shipping-calc', SILVERSEA_PLUGIN_URL.'assets/css/shipping-calculator.css', [], SILVERSEA_VERSION);
+    wp_enqueue_script('silversea-shipping-calc', SILVERSEA_PLUGIN_URL.'assets/js/shipping-calculator.js',  ['jquery'], SILVERSEA_VERSION, true);
     wp_localize_script('silversea-shipping-calc', 'silvSea', [
         'ajaxUrl'      => admin_url('admin-ajax.php'),
         'nonce'        => wp_create_nonce('silversea_calc'),
@@ -637,12 +702,13 @@ function silversea_shipping_shortcode( $atts = [] ) {
         'requireQuote'    => get_option('silversea_require_quote', '0'),
         'productColor'    => $color_info,
         'extras'          => $extras_data,
-        'cities'          => silversea_get_cities(),
+        'cities'           => silversea_get_cities(),
+        'productCityPrices'=> $city_prices,
     ]);
 
     $tooltip_retiro    = 'Seleccione la ciudad más cercana al domicilio de entrega del contenedor';
     $tooltip_salida    = 'Seleccione la ciudad más cercana al domicilio de entrega del contenedor';
-    $tooltip_transport = '"con descarga": SILVERSEA proporciona el camión que incluye grúa con descarga del contenedor en la ubicación precisa donde se requiere' . "\n\n" . '"sin descarga": SILVERSEA proporciona el transporte del contenedor y el cliente deberá hacerse cargo de los medios para descargarlo en la ubicación requerida';
+    $tooltip_transport = '"con descarga": SILVERSEA proporciona el camión que incluye grúa con descarga del contenedor en la ubicación precisa donde se requiere' . "\n\n" . '"sin descarga": SILVERSEA proporciona el transporte del contenedor y deberá hacerse cargo de los medios para descargarlo en la ubicación requerida';
 
     ob_start(); ?>
     <div class="sc-wrap"><div class="sc-card">
@@ -665,8 +731,8 @@ function silversea_shipping_shortcode( $atts = [] ) {
       <div class="sc-bulk-notice">
         <span class="sc-bulk-notice-icon">?</span>
         <div>
-          <strong>¿Necesitas más de 7 contenedores?</strong><br>
-          Contáctate con nuestro equipo comercial enviando un correo a
+          <strong>¿Necesita más de 7 contenedores?</strong><br>
+          Póngase en contacto con nuestro equipo comercial enviando un correo a
           <a href="mailto:sales@silverseacontainers.com">sales@silverseacontainers.com</a>
         </div>
       </div>
@@ -690,17 +756,17 @@ function silversea_shipping_shortcode( $atts = [] ) {
       <p class="sc-title">Método de entrega</p>
       <div class="sc-toggle" id="methodToggle">
         <button class="sc-toggle-btn" data-method="delivery" onclick="scSetMethod('delivery')"><span class="dot"></span> Con entrega</button>
-        <button class="sc-toggle-btn active" data-method="pickup"   onclick="scSetMethod('pickup')"><span class="dot"></span> A retirar</button>
+        <button class="sc-toggle-btn active" data-method="pickup"   onclick="scSetMethod('pickup')"><span class="dot"></span> A recoger</button>
       </div>
 
       <div id="scPickupPanel">
         <div class="sc-field">
           <label class="sc-label" for="scPickupCity">
-            Ciudad de retiro
+            Ciudad de recogida
             <span class="sc-tooltip-trigger" data-tip="<?php echo esc_attr($tooltip_retiro); ?>">?</span>
           </label>
           <select class="sc-select" id="scPickupCity" onchange="scPickupCityChanged()">
-            <option value="">Selecciona una ciudad</option>
+            <option value="">Seleccione una ciudad</option>
             <?php foreach ( silversea_get_cities_for_mode('pickup') as $city ) : ?>
               <option value="<?php echo esc_attr($city['key']); ?>"><?php echo esc_html($city['name'] . ' — ' . $city['depot']); ?></option>
             <?php endforeach; ?>
@@ -709,7 +775,7 @@ function silversea_shipping_shortcode( $atts = [] ) {
         </div>
         <div id="scPickupInfo" class="sc-tip sc-hidden">
           <span class="sc-tip-icon">ⓘ</span>
-          <span>El contenedor estará disponible en un plazo estimado de <strong>5 días hábiles</strong>. El retiro en depósito no tiene costo adicional.</span>
+          <span>El contenedor estará disponible en un plazo estimado de <strong>5 días hábiles</strong>. La recogida en depósito no tiene coste adicional.</span>
         </div>
         <?php if ( $mode === 'single' && ! empty($extras_data) ) : ?>
         <div class="sc-extras-section">
@@ -717,7 +783,7 @@ function silversea_shipping_shortcode( $atts = [] ) {
           <div class="sc-extras-grid"></div>
         </div>
         <?php endif; ?>
-        <button class="sc-btn-continue sc-hidden" id="scContinueBtn" onclick="scContinue()">Guardar preferencia de retiro</button>
+        <button class="sc-btn-continue sc-hidden" id="scContinueBtn" onclick="scContinue()">Guardar preferencia de recogida</button>
       </div>
 
       <div id="scDeliveryPanel" class="sc-hidden">
@@ -727,7 +793,7 @@ function silversea_shipping_shortcode( $atts = [] ) {
             <span class="sc-tooltip-trigger" data-tip="<?php echo esc_attr($tooltip_salida); ?>">?</span>
           </label>
           <select class="sc-select" id="scOriginCity" onchange="scSuggestTransport()">
-            <option value="">Selecciona ciudad de origen</option>
+            <option value="">Seleccione ciudad de origen</option>
             <?php foreach ( silversea_get_cities_for_mode('delivery') as $city ) : ?>
               <option value="<?php echo esc_attr($city['key']); ?>"><?php echo esc_html($city['name'] . ' — ' . $city['depot']); ?></option>
             <?php endforeach; ?>
@@ -767,7 +833,7 @@ function silversea_shipping_shortcode( $atts = [] ) {
         <div id="scResultArea" class="sc-hidden">
           <div class="sc-result">
             <div class="sc-result-row">
-              <span class="sc-result-label">Costo de envío estimado</span>
+              <span class="sc-result-label">Coste de envío estimado</span>
               <span id="scResultPrice" class="sc-result-price"></span>
             </div>
             <div id="scResultDetail"    class="sc-result-detail"></div>
@@ -794,21 +860,20 @@ function silversea_shipping_ajax_calc() {
     $method = sanitize_key($_POST['method']??'');
     $transp = in_array($_POST['transport']??'',['sin','con'])?$_POST['transport']:'sin';
 
-    if ($method==='pickup') wp_send_json_success(['free'=>true,'price'=>0,'detail'=>'Retiro en depósito sin costo adicional.','days'=>5]);
+    if ($method==='pickup') wp_send_json_success(['free'=>true,'price'=>0,'detail'=>'Recogida en depósito sin coste adicional.','days'=>5]);
     if ($method!=='delivery') wp_send_json_error(['message'=>'Método inválido.']);
 
     $origin       = sanitize_key($_POST['origin']??'');
-    $cp           = preg_replace('/\D/','', $_POST['postal_code']??'');
+    $cp           = silversea_normalize_cp($_POST['postal_code']??'');
     $product_size = in_array((string)($_POST['product_size']??''),['10','20','40'])?(int)$_POST['product_size']:20;
     $quantity     = max(1,(int)($_POST['quantity']??1));
 
     if (!in_array($origin, silversea_get_city_keys('delivery'), true)) wp_send_json_error(['message'=>'Ciudad de origen inválida.']);
-    if (strlen($cp)<4||strlen($cp)>5) wp_send_json_error(['message'=>'Código postal inválido.']);
+    if (!$cp) wp_send_json_error(['message'=>'Código postal inválido. Debe tener 5 dígitos.']);
 
     global $wpdb; $table=$wpdb->prefix.'silversea_tarifas';
-    $row=$wpdb->get_row($wpdb->prepare("SELECT * FROM {$table} WHERE ciudad_origen=%s AND cp_destino=%s LIMIT 1",$origin,$cp),ARRAY_A);
-    if (!$row) $row=$wpdb->get_row($wpdb->prepare("SELECT * FROM {$table} WHERE ciudad_origen=%s AND cp_destino LIKE %s LIMIT 1",$origin,substr($cp,0,4).'%'),ARRAY_A);
-    if (!$row) wp_send_json_error(['message'=>"No encontramos tarifa para el CP {$cp} desde " . silversea_origin_label($origin) . '. Contactanos para una cotización personalizada.']);
+    $row=silversea_find_tarifa_row($origin,$cp);
+    if (!$row) wp_send_json_error(['message'=>"No encontramos tarifa para el CP {$cp} desde " . silversea_origin_label($origin) . '. Contáctenos para una cotización personalizada.']);
 
     $units_per=$product_size===10?1:($product_size===20?2:4);
     $trucks=(int)ceil(($units_per*$quantity)/4);
@@ -857,6 +922,34 @@ function silversea_shipping_estimate_days($km) {
     if($km<=100)return 2; if($km<=300)return 3; if($km<=600)return 4; return 5;
 }
 
+/* ══ 8b. AJAX — AUTOCOMPLETE DE CÓDIGOS POSTALES ══════════ */
+
+add_action('wp_ajax_silversea_cp_suggest',        'silversea_cp_suggest');
+add_action('wp_ajax_nopriv_silversea_cp_suggest', 'silversea_cp_suggest');
+
+function silversea_cp_suggest() {
+    if (!check_ajax_referer('silversea_calc','nonce',false)) wp_send_json_error([],403);
+
+    $origin = sanitize_key($_POST['origin'] ?? '');
+    $term   = preg_replace('/\D/','', $_POST['term'] ?? '');
+
+    if (!in_array($origin, silversea_get_city_keys('delivery'), true) || strlen($term) < 2)
+        wp_send_json_success([]);
+
+    global $wpdb; $table = $wpdb->prefix.'silversea_tarifas';
+    /* Buscar por prefijo, contemplando la forma con y sin cero inicial */
+    $like     = $wpdb->esc_like($term).'%';
+    $like_alt = $wpdb->esc_like(ltrim($term,'0')).'%';
+    $rows = $wpdb->get_results($wpdb->prepare(
+        "SELECT cp_destino, municipio_destino FROM {$table}
+         WHERE ciudad_origen=%s AND (cp_destino LIKE %s OR cp_destino LIKE %s)
+         ORDER BY cp_destino LIMIT 12",
+        $origin, $like, $like_alt
+    ), ARRAY_A);
+
+    wp_send_json_success($rows ?: []);
+}
+
 /* ══ 9. AJAX HANDLER CONSOLIDADO ══════════════════════════ */
 
 add_action('wp_ajax_silversea_calc_consolidated',        'silversea_shipping_ajax_calc_consolidated');
@@ -871,7 +964,7 @@ function silversea_shipping_ajax_calc_consolidated() {
     $origin = sanitize_key($_POST['origin']??'');
     $cp     = preg_replace('/\D/','', $_POST['postal_code']??'');
 
-    if ($method==='pickup') wp_send_json_success(['free'=>true,'price'=>0,'detail'=>'Retiro en depósito sin costo adicional.','days'=>5]);
+    if ($method==='pickup') wp_send_json_success(['free'=>true,'price'=>0,'detail'=>'Recogida en depósito sin coste adicional.','days'=>5]);
 
     $raq_content = silversea_get_raq_content();
     if (empty($raq_content)) wp_send_json_error(['message'=>'No hay productos en la selección.']);
@@ -880,7 +973,7 @@ function silversea_shipping_ajax_calc_consolidated() {
     if (is_wp_error($result)) wp_send_json_error(['message'=>$result->get_error_message()]);
 
     wp_send_json_success(['price'=>$result['total'],
-        'detail'=>'Selección completa · '.$result['transp_label'].' · '.$result['destino'].' · desde '.ucfirst($result['origin']).' · '.$result['trucks'].' camión'.($result['trucks']>1?'es':''),
+        'detail'=>'Selección completa · '.$result['transp_label'].' · '.$result['destino'].' · desde '.silversea_origin_label($result['origin']).' · '.$result['trucks'].' camión'.($result['trucks']>1?'es':''),
         'breakdown'=>$result['breakdown'],'trucks'=>$result['trucks'],'days'=>$result['days']]);
 }
 
@@ -922,7 +1015,7 @@ add_action('wp_footer', function() {
                 .then(function(){ window.location.reload(); })
                 .catch(function(){
                     if(row){row.style.opacity='1';row.style.pointerEvents='';}
-                    alert('Error al eliminar. Intentá nuevamente.');
+                    alert('Error al eliminar. Inténtelo de nuevo.');
                 });
             }, true);
         });
@@ -933,6 +1026,225 @@ add_action('wp_footer', function() {
 
 require_once __DIR__ . '/shipping-session.php';
 require_once __DIR__ . '/shipping-quote-pages.php';
+
+/* ══════════════════════════════════════════════════════════════
+   PRECIO EN CATÁLOGO — según opción configurada
+══════════════════════════════════════════════════════════════ */
+
+add_filter( 'woocommerce_get_price_html', 'silversea_catalog_price_html', 20, 2 );
+
+function silversea_catalog_price_html( $price_html, $product ) {
+    $mode = get_option( 'silversea_catalog_price_mode', 'wc' );
+    if ( $mode === 'wc' ) return $price_html;
+
+    $lookup_id = $product->is_type('variation') ? $product->get_parent_id() : $product->get_id();
+    $raw       = get_post_meta( $lookup_id, '_silversea_city_prices', true );
+    $prices    = $raw ? json_decode( $raw, true ) : [];
+    $prices    = array_filter( (array) $prices, 'is_numeric' );
+    if ( empty( $prices ) ) return $price_html;
+
+    if ( $mode === 'min' ) {
+        $min = min( array_map( 'floatval', $prices ) );
+        return 'desde ' . wc_price( $min );
+    }
+
+    if ( $mode === 'default_city' ) {
+        $city = get_option( 'silversea_catalog_price_default_city', '' );
+        if ( $city && isset( $prices[ $city ] ) ) {
+            return wc_price( (float) $prices[ $city ] );
+        }
+    }
+
+    return $price_html;
+}
+
+/* ══════════════════════════════════════════════════════════════
+   AJAX — guardar precios por ciudad
+══════════════════════════════════════════════════════════════ */
+
+add_action( 'wp_ajax_silversea_save_city_prices', function() {
+    check_ajax_referer( 'silversea_city_prices', 'nonce' );
+    if ( ! current_user_can('manage_woocommerce') ) wp_send_json_error( null, 403 );
+
+    $items = json_decode( stripslashes( $_POST['items'] ?? '[]' ), true );
+    if ( ! is_array( $items ) ) wp_send_json_error( ['message' => 'Datos inválidos.'] );
+
+    $valid_cities = silversea_get_city_keys();
+    $saved = 0;
+
+    foreach ( $items as $item ) {
+        $id = (int) ( $item['id'] ?? 0 );
+        if ( ! $id ) continue;
+        $prices = [];
+        foreach ( (array) ( $item['prices'] ?? [] ) as $city => $price ) {
+            $city  = sanitize_key( $city );
+            $price = trim( (string) $price );
+            if ( ! in_array( $city, $valid_cities, true ) ) continue;
+            if ( $price !== '' && is_numeric( $price ) && (float)$price > 0 ) {
+                $prices[ $city ] = number_format( (float)$price, 2, '.', '' );
+            }
+        }
+        update_post_meta( $id, '_silversea_city_prices', wp_json_encode( $prices ) );
+        $saved++;
+    }
+
+    wp_send_json_success( ['saved' => $saved] );
+} );
+
+/* ══════════════════════════════════════════════════════════════
+   PÁGINA — Precios por Ciudad (mapeo en lote)
+══════════════════════════════════════════════════════════════ */
+
+function silversea_render_city_prices_page() {
+    $cat_id = (int) ( $_GET['cat'] ?? 0 );
+    $search = sanitize_text_field( $_GET['s'] ?? '' );
+
+    $args = [
+        'post_type'      => 'product',
+        'post_status'    => 'publish',
+        'posts_per_page' => -1,
+        'orderby'        => ['menu_order' => 'ASC', 'title' => 'ASC'],
+    ];
+    if ( $cat_id ) $args['tax_query'] = [['taxonomy' => 'product_cat', 'field' => 'term_id', 'terms' => $cat_id]];
+    if ( $search ) $args['s'] = $search;
+
+    $products   = get_posts( $args );
+    $categories = get_terms( ['taxonomy' => 'product_cat', 'hide_empty' => true, 'orderby' => 'name'] );
+    $cities     = silversea_get_cities();
+    ?>
+    <div class="wrap" style="max-width:1100px;">
+      <h1>🏙 Precios por Ciudad</h1>
+      <p style="color:#6b7280;font-size:13px;margin-top:4px;">
+        Precio del contenedor según la ciudad de retiro o salida elegida por el cliente.
+        Dejá vacío para que aplique el precio general de WooCommerce.
+      </p>
+
+      <!-- Filtros -->
+      <form method="get" style="display:flex;gap:10px;align-items:center;margin:16px 0;">
+        <input type="hidden" name="page" value="silversea-city-prices">
+        <select name="cat" onchange="this.form.submit()" style="height:34px;">
+          <option value="">Todas las categorías</option>
+          <?php foreach ( $categories as $cat ) : ?>
+            <option value="<?php echo $cat->term_id; ?>" <?php selected($cat_id,$cat->term_id); ?>>
+              <?php echo esc_html($cat->name); ?>
+            </option>
+          <?php endforeach; ?>
+        </select>
+        <input type="search" name="s" value="<?php echo esc_attr($search); ?>"
+               placeholder="Buscar…" style="width:200px;height:34px;padding:0 8px;">
+        <button type="submit" class="button">Filtrar</button>
+        <?php if ( $cat_id || $search ) : ?>
+          <a href="?page=silversea-city-prices" class="button">✕ Limpiar</a>
+        <?php endif; ?>
+        <span style="font-size:13px;color:#9ca3af;"><?php echo count($products); ?> productos</span>
+      </form>
+
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;">
+        <button id="scp-save" class="button button-primary" style="height:36px;padding:0 20px;font-size:14px;">
+          💾 Guardar precios
+        </button>
+        <span id="scp-status" style="font-size:13px;"></span>
+      </div>
+
+      <?php if ( empty($products) ) : ?>
+        <p style="color:#9ca3af;text-align:center;padding:48px;">No se encontraron productos.</p>
+      <?php else : ?>
+      <table class="wp-list-table widefat fixed" id="scp-table">
+        <thead>
+          <tr>
+            <th style="width:44px;"></th>
+            <th>Producto</th>
+            <th style="width:110px;">SKU</th>
+            <?php foreach ( $cities as $city ) : ?>
+              <th style="width:110px;text-align:center;"><?php echo esc_html($city['name']); ?></th>
+            <?php endforeach; ?>
+          </tr>
+        </thead>
+        <tbody>
+        <?php foreach ( $products as $post ) :
+            $product = wc_get_product( $post->ID );
+            if ( ! $product ) continue;
+            $thumb  = get_the_post_thumbnail_url( $post->ID, [36,36] ) ?: wc_placeholder_img_src([36,36]);
+            $sku    = $product->get_sku() ?: '—';
+            $prices = json_decode( get_post_meta($post->ID,'_silversea_city_prices',true) ?: '{}', true );
+            $is_var = $product->is_type('variable');
+        ?>
+        <tr class="scp-row" data-id="<?php echo $post->ID; ?>">
+          <td style="text-align:center;padding:8px 4px;">
+            <img src="<?php echo esc_url($thumb); ?>" width="34" height="34"
+                 style="border-radius:4px;object-fit:cover;vertical-align:middle;">
+          </td>
+          <td>
+            <?php echo esc_html($post->post_title); ?>
+            <?php if ($is_var) : ?>
+              <span style="font-size:11px;background:#f5f3ff;color:#7c3aed;padding:1px 7px;border-radius:4px;margin-left:6px;">Variable</span>
+            <?php endif; ?>
+          </td>
+          <td><code style="font-size:11px;background:#f3f4f6;padding:2px 6px;border-radius:3px;"><?php echo esc_html($sku); ?></code></td>
+          <?php foreach ( $cities as $city ) : ?>
+            <td style="text-align:center;">
+              <input type="number" class="scp-input" step="0.01" min="0"
+                     data-city="<?php echo esc_attr($city['key']); ?>"
+                     value="<?php echo esc_attr($prices[$city['key']] ?? ''); ?>"
+                     placeholder="—"
+                     style="width:90px;height:28px;padding:0 6px;font-size:13px;border:1px solid #d1d5db;border-radius:4px;text-align:right;">
+            </td>
+          <?php endforeach; ?>
+        </tr>
+        <?php endforeach; ?>
+        </tbody>
+      </table>
+      <?php endif; ?>
+    </div>
+
+    <style>
+    #scp-table th, #scp-table td { vertical-align:middle; }
+    .scp-input:focus { border-color:#2271b1!important; box-shadow:0 0 0 1px #2271b1; outline:none; }
+    .scp-input.scp-dirty { border-color:#f59e0b!important; background:#fffbeb; }
+    </style>
+
+    <script>
+    jQuery(function($) {
+      var nonce = '<?php echo wp_create_nonce('silversea_city_prices'); ?>';
+
+      $(document).on('input', '.scp-input', function() { $(this).addClass('scp-dirty'); });
+
+      $('#scp-save').on('click', function() {
+        var $btn = $(this), $status = $('#scp-status');
+        var items = [];
+
+        $('.scp-row').each(function() {
+          var id = $(this).data('id');
+          var prices = {};
+          $(this).find('.scp-input').each(function() {
+            var v = $(this).val().trim();
+            if (v !== '') prices[$(this).data('city')] = v;
+          });
+          items.push({ id: id, prices: prices });
+        });
+
+        $btn.prop('disabled', true).text('Guardando…');
+        $status.text('').css('color','#6b7280');
+
+        $.post(ajaxurl, { action:'silversea_save_city_prices', nonce:nonce, items:JSON.stringify(items) })
+          .done(function(res) {
+            if (res.success) {
+              $status.css('color','#059669').text('✓ ' + res.data.saved + ' producto(s) guardados.');
+              $('.scp-input').removeClass('scp-dirty');
+            } else {
+              $status.css('color','#dc2626').text('✗ Error al guardar.');
+            }
+          })
+          .fail(function() { $status.css('color','#dc2626').text('✗ Error de conexión.'); })
+          .always(function() {
+            $btn.prop('disabled', false).text('💾 Guardar precios');
+            setTimeout(function(){ $status.text(''); }, 5000);
+          });
+      });
+    });
+    </script>
+    <?php
+}
 
 /* ══════════════════════════════════════════════════════════════
    EXPORTAR CONTENEDORES — descarga CSV con atributos completos

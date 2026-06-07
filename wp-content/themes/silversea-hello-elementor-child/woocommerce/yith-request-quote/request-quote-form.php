@@ -87,7 +87,7 @@ $ya_cotizo = WC()->session && WC()->session->get('silversea_shipping_data');
                 </div>
                 <input type="tel" class="silversea-input" name="rqa_phone" id="rqa-phone"
                        placeholder="Teléfono"
-                       value="<?php echo esc_attr($user_phone); ?>">
+                       value="<?php echo esc_attr($user_phone); ?>" required>
             </div>
 
             <!-- Ciudad y CP -->
@@ -148,54 +148,18 @@ $ya_cotizo = WC()->session && WC()->session->get('silversea_shipping_data');
                    value="<?php echo esc_attr(wp_create_nonce('send-request-quote')); ?>">
 
             <button type="submit" class="silversea-btn-primary raq-send-request">
-                Llenar una Solicitud
+                Rellenar una solicitud
             </button>
 
         </form>
     </div>
 </div>
 
-<script>
-(function() {
-    /* Sincronizar hidden fields cuando el cotizador guarda */
-    document.addEventListener('silversea:shipping:saved', syncShippingToForm);
-
-    var form = document.getElementById('yith-ywraq-mail-form');
-    if ( form ) form.addEventListener('submit', syncShippingToForm);
-
-    document.addEventListener('DOMContentLoaded', function() {
-        setTimeout(syncShippingToForm, 500);
-
-        /* Botón recalcular */
-        var btnRecalc = document.getElementById('silversea-recotizar');
-        if ( btnRecalc ) {
-            btnRecalc.addEventListener('click', function(e) {
-                e.preventDefault();
-                var widget = document.getElementById('silversea-widget-recotizar');
-                var summary = btnRecalc.closest('.silversea-shipping-summary-compact');
-                if ( widget )  widget.classList.toggle('sc-hidden');
-                if ( summary ) summary.style.display = 'none';
-            });
-        }
-    });
-
-    function syncShippingToForm() {
-        function set(id, val) { var el = document.getElementById(id); if (el) el.value = val || ''; }
-        set('rqa-shipping-method',    getShippingVal('method'));
-        set('rqa-shipping-origin',    getShippingVal('origin'));
-        set('rqa-shipping-cp',        getShippingVal('cp'));
-        set('rqa-shipping-transport', getShippingVal('transport'));
-        set('rqa-shipping-price',     getShippingVal('price'));
-        set('rqa-shipping-pickup',    getShippingVal('pickup'));
-    }
-
-    function getShippingVal(key) {
-        /* Intentar desde el evento custom primero, luego data attributes */
-        var widget = document.querySelector('.sc-wrap');
-        if ( ! widget ) return '';
-        var map = { method:'scMethod', origin:'scOrigin', cp:'scCp',
-                    transport:'scTransport', price:'scPrice', pickup:'scPickup' };
-        return widget.dataset[map[key]] || '';
-    }
-})();
-</script>
+<?php /*
+   La sincronización de los campos ocultos de envío la maneja el plugin:
+   shipping-calculator.js → scSyncFormFields() los completa por ID
+   (rqa-shipping-*) cuando el cliente calcula/guarda el envío, y además
+   guarda los datos en la sesión de WC como respaldo. El toggle "Recalcular"
+   lo maneja el propio shortcode [silversea_quote_form] (#silversea-recotizar-form).
+   No se necesita JS adicional acá.
+*/ ?>

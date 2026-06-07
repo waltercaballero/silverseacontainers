@@ -282,7 +282,7 @@ function silversea_handle_resend_single() {
     } else {
         $body    = get_post_meta($quote_id, '_sq_email_body_client', true);
         $to      = $debug_mode ? $email_debug : $client_email;
-        $subject = sprintf('[Silversea Containers] Tu solicitud de cotización #%d', $quote_id);
+        $subject = sprintf('[Silversea Containers] Su solicitud de cotización #%d', $quote_id);
         if ( ! $to ) wp_die('El cliente no tiene email registrado.');
     }
 
@@ -316,10 +316,10 @@ function silversea_load_quote_data( $quote_id ) {
 
     $raq_content = [];
     foreach ( $products as $item ) {
-        $found = wc_get_products( ['name' => $item['name'], 'limit' => 1] );
-        if ( ! empty($found) ) {
+        $_product = silversea_resolve_quote_product( $item );
+        if ( $_product ) {
             $raq_content[] = [
-                'product_id'       => $found[0]->get_id(),
+                'product_id'       => $_product->get_id(),
                 'quantity'         => $item['qty'],
                 'silversea_addons' => $item['addons'] ?? [],
             ];
@@ -374,10 +374,11 @@ function silversea_generate_email_body_for_quote( $quote_id, $type ) {
     $is_sales        = ( $type === 'sales' );
     $prices_for_type = $is_sales ? true : $show_prices;
     $raq_content     = $data['raq_content'];
+    $price_city      = silversea_derive_price_city( $data );
 
     $products_html = ! empty($raq_content)
-        ? silversea_email_products_html( $raq_content, $prices_for_type )
-        : silversea_email_products_html_from_meta( $quote_id, $prices_for_type );
+        ? silversea_email_products_html( $raq_content, $prices_for_type, $price_city )
+        : silversea_email_products_html_from_meta( $quote_id, $prices_for_type, $price_city );
 
     $shipping_html = silversea_email_shipping_html( $data, $prices_for_type );
 
@@ -653,6 +654,9 @@ function silversea_process_and_save( $args ) {
 
     $price = $consolidated ? $consolidated['total'] : $d['price'];
 
+    /* Ciudad que determina el precio */
+    $price_city = silversea_derive_price_city( $d );
+
     /* Construir array de productos para guardar */
     $products = [];
     foreach ( $raq_content as $raq ) {
@@ -677,12 +681,18 @@ function silversea_process_and_save( $args ) {
             $color   = ! empty($c_terms) ? $c_terms[0] : '';
         }
 
+        $unit_price = silversea_get_product_city_price( $pid, $price_city );
+        if ( $unit_price === null ) $unit_price = (float) $_product->get_price();
+
         $products[] = [
-            'name'      => $_product->get_title(),
-            'condition' => ! empty($terms) ? $terms[0] : '',
-            'qty'       => (int) $raq['quantity'],
-            'addons'    => $raq['silversea_addons'] ?? [],
-            'color'     => $color,
+            'name'       => $_product->get_title(),
+            'product_id' => (int) $pid,
+            'condition'  => ! empty($terms) ? $terms[0] : '',
+            'qty'        => (int) $raq['quantity'],
+            'addons'     => $raq['silversea_addons'] ?? [],
+            'color'      => $color,
+            'price'      => $unit_price,
+            'city'       => $price_city,
         ];
     }
 
@@ -776,10 +786,10 @@ function silversea_process_and_save( $args ) {
 /* Descripciones hardcodeadas para transporte según tipo */
 function silversea_get_transport_desc( $transport, $method ) {
     if ( $method === 'pickup' ) {
-        return 'Retiro en depósito sin costo de transporte adicional. Disponible en 5 días hábiles.';
+        return 'Recogida en depósito sin coste de transporte adicional. Disponible en 5 días hábiles.';
     }
     if ( $transport === 'sin' ) {
-        return 'Incluye transporte hasta tu dirección. Descarga no incluida (opción disponible).';
+        return 'Incluye transporte hasta su dirección. Descarga no incluida (opción disponible).';
     }
     return 'Incluye transporte con grúa y descarga del contenedor en la ubicación requerida.';
 }
@@ -788,7 +798,7 @@ function silversea_get_transport_desc( $transport, $method ) {
    $show_prices: si mostrar precio por unidad */
 /* Construir HTML de productos desde _sq_products meta (fallback robusto).
    Usado cuando raq_content no está disponible o llega vacío. */
-function silversea_email_products_html_from_meta( $post_id, $show_prices ) {
+function silversea_email_products_html_from_meta( $post_id, $show_prices, $city = '' ) {
     $products = json_decode( get_post_meta($post_id, '_sq_products', true) ?: '[]', true );
     if ( empty($products) ) return '<p style="color:#9ca3af;">—</p>';
 
@@ -800,15 +810,15 @@ function silversea_email_products_html_from_meta( $post_id, $show_prices ) {
         $addons    = $item['addons']    ?? [];
 
         /* Buscar el producto en WC para obtener precio y descripción */
-        $found    = wc_get_products( ['name' => $name, 'limit' => 1] );
+        $_product = silversea_resolve_quote_product( $item );
         $price    = 0.0;
         $desc     = '';
         $tamano   = '';
         $condicion= $condition;
 
-        if ( ! empty($found) ) {
-            $_product = $found[0];
-            $price    = (float) $_product->get_price();
+        if ( $_product ) {
+            $city_p    = $city ? silversea_get_product_city_price( $_product->get_id(), $city ) : null;
+            $price     = $city_p !== null ? $city_p : (float) $_product->get_price();
             $desc     = wp_trim_words( wp_strip_all_tags( get_post_field('post_content', $_product->get_id()) ), 40, '…' );
             $t_terms  = wc_get_product_terms( $_product->get_id(), 'pa_tamano',    ['fields' => 'names'] );
             $c_terms  = wc_get_product_terms( $_product->get_id(), 'pa_condicion', ['fields' => 'names'] );
@@ -845,16 +855,17 @@ function silversea_email_products_html_from_meta( $post_id, $show_prices ) {
     return $html;
 }
 
-function silversea_email_products_html( $raq_content, $show_prices ) {
+function silversea_email_products_html( $raq_content, $show_prices, $city = '' ) {
     $html = '';
     foreach ( $raq_content as $raq ) {
         $pid      = ! empty($raq['variation_id']) ? $raq['variation_id'] : $raq['product_id'];
         $_product = wc_get_product( $pid );
         if ( ! $_product ) continue;
 
-        $qty    = (int)( $raq['quantity'] ?? 1 );
-        $title  = $_product->get_title();
-        $price  = (float) $_product->get_price();
+        $qty         = (int)( $raq['quantity'] ?? 1 );
+        $title       = $_product->get_title();
+        $city_price  = $city ? silversea_get_product_city_price( $pid, $city ) : null;
+        $price       = $city_price !== null ? $city_price : (float) $_product->get_price();
 
         /* Descripción del producto desde post_content */
         $description = wp_strip_all_tags( get_post_field('post_content', $_product->get_id()) );
@@ -914,6 +925,17 @@ function silversea_email_products_html( $raq_content, $show_prices ) {
     return $html ?: '<p style="color:#9ca3af;">—</p>';
 }
 
+/**
+ * Determina la ciudad que define el precio del contenedor.
+ * Pickup → ciudad de retiro. Delivery → ciudad de origen.
+ */
+function silversea_derive_price_city( $data ) {
+    if ( ( $data['method'] ?? '' ) === 'pickup' ) {
+        return $data['pickup'] ?? '';
+    }
+    return $data['origin'] ?? '';
+}
+
 /* Construir bloque HTML de transporte */
 function silversea_email_shipping_html( $data, $show_prices ) {
     $con    = $data['consolidated'] ?? null;
@@ -925,7 +947,7 @@ function silversea_email_shipping_html( $data, $show_prices ) {
     if ( $method === 'pickup' ) {
         $pickup_label = silversea_origin_label( $data['pickup'] ?? '' );
         $html .= '<div class="tb" style="background:#f0fdf4;border-radius:8px;padding:16px 20px;margin:0;">';
-        $html .= '<p class="tl" style="font-size:14px;font-weight:600;color:#1D9E75;margin:0 0 3px;">✓ Retiro en depósito · ' . esc_html($pickup_label) . ' — Sin costo</p>';
+        $html .= '<p class="tl" style="font-size:14px;font-weight:600;color:#1D9E75;margin:0 0 3px;">✓ Recogida en depósito · ' . esc_html($pickup_label) . ' — Sin coste</p>';
         $html .= '<p class="td" style="font-size:13px;color:#374151;margin:0;">' . esc_html($desc) . '</p>';
         $html .= '</div>';
         return $html;
@@ -952,14 +974,25 @@ function silversea_email_shipping_html( $data, $show_prices ) {
                . '<td style="padding:8px 12px;text-align:right;font-weight:700;color:#0F2557;">€ '
                . number_format((float)$con['total'],2,',','.') . '</td></tr>';
         $html .= '</table>';
-        if ( isset($con['days']) ) {
-            $html .= '<p style="margin:6px 0 0;font-size:12px;color:#9ca3af;">Plazo estimado: '
-                   . (int)$con['days'] . ' días hábiles</p>';
-        }
     } elseif ( $show_prices && isset($data['price']) && $data['price'] > 0 ) {
         $html .= '<p style="font-size:14px;font-weight:600;color:#0F2557;margin-top:8px;">€ '
                . number_format((float)$data['price'],2,',','.') . '</p>';
     }
+
+    /* Plazo de entrega */
+    $html .= '<p style="margin:10px 0 0;font-size:12px;color:#6b7280;">'
+           . 'El plazo estándar es de 5 a 7 días hábiles desde la confirmación del pago. '
+           . 'El plazo exacto se acuerda al confirmar la oferta y puede variar según la ubicación de entrega y la disponibilidad de stock.'
+           . '</p>';
+
+    /* Nota BAF + complejidad — debajo del total de envío */
+    $html .= '<p style="margin:10px 0 0;font-size:11px;color:#9ca3af;font-style:italic;'
+           . 'padding-top:8px;border-top:1px dashed #e5e7eb;line-height:1.55;">'
+           . 'El precio final puede estar sujeto a modificación en casos donde las condiciones de entrega '
+           . 'presenten una complejidad especial (accesibilidad limitada, obstáculos en zona de descarga, '
+           . 'cableado aéreo, terreno irregular/arenoso, u otros requisitos no contemplados en la cotización '
+           . 'inicial), o por variaciones en el BAF (Factor de Ajuste de Combustible) aplicables al transporte terrestre.'
+           . '</p>';
 
     $html .= '</div>'; /* close .tb */
     return $html;
@@ -967,12 +1000,15 @@ function silversea_email_shipping_html( $data, $show_prices ) {
 
 /* Construir total estimado para email cliente */
 function silversea_email_total( $raq_content, $data ) {
+    $city  = silversea_derive_price_city( $data );
     $total = 0.0;
     foreach ( $raq_content as $raq ) {
         $pid      = ! empty($raq['variation_id']) ? $raq['variation_id'] : $raq['product_id'];
         $_product = wc_get_product( $pid );
         if ( ! $_product ) continue;
-        $total += (float)$_product->get_price() * (int)($raq['quantity'] ?? 1);
+        $cp    = $city ? silversea_get_product_city_price( $pid, $city ) : null;
+        $price = $cp !== null ? $cp : (float) $_product->get_price();
+        $total += $price * (int)($raq['quantity'] ?? 1);
     }
     $con = $data['consolidated'] ?? null;
     if ( $con ) $total += (float)($con['total'] ?? 0);
@@ -1036,7 +1072,7 @@ function silversea_email_template( $quote_id, $data, $products_html, $shipping_h
         if ( $total > 0 ) $total_str = number_format($total, 2, ',', '.');
     }
 
-    $disclaimer = 'El precio final puede estar sujeto a modificación en aquellos casos donde las condiciones de entrega presenten una complejidad especial (accesibilidad limitada, obstáculos en zona de descarga, cableado aéreo, terreno irregular/arenoso, u otros requisitos no contemplados en la cotización inicial). En caso de detectar dichas dificultades, se realizará una cotización personalizada adaptada a cada casuística, garantizando los medios adecuados para una entrega correcta y segura.';
+    $disclaimer = ''; /* Nota de precio/BAF movida a la sección de Transporte */
 
     $s = 'body{margin:0;padding:0;background:#f5f5f5;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;color:#111;}';
     $s .= '.wrap{max-width:620px;margin:32px auto;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,.08);}';
@@ -1058,18 +1094,18 @@ function silversea_email_template( $quote_id, $data, $products_html, $shipping_h
     $s .= '.disc{margin:14px 0 0;font-size:11px;color:#aab0bb;font-style:italic;line-height:1.65;padding-top:12px;border-top:1px dashed #e5e7eb;}';
 
     $o  = '<!DOCTYPE html><html><head><meta charset="UTF-8"><style>' . $s . '</style></head><body><div class="wrap">';
-    $o .= '<div class="hd"><h1>SILVERSEA Containers</h1><p>Resumen de tu solicitud · #' . $quote_id . '</p></div>';
+    $o .= '<div class="hd"><h1>SILVERSEA Containers</h1><p>Resumen de su solicitud · #' . $quote_id . '</p></div>';
     $o .= '<div class="bd">';
     $o .= '<p class="gr">Hola <strong>' . $name . '</strong>,<br><br>'
        .  'Gracias por contactar con <strong>SILVERSEA Containers</strong>. '
-       .  'A continuación te enviamos el resumen de tu solicitud'
-       .  ( $show_prices ? ' y una estimación de precios para que tengas una referencia clara.' : '.' ) . '</p>';
-    $o .= '<p class="st" style="margin-top:0;">Resumen de tu solicitud</p>';
+       .  'A continuación le enviamos el resumen de su solicitud'
+       .  ( $show_prices ? ' y una estimación de precios para que tenga una referencia clara.' : '.' ) . '</p>';
+    $o .= '<p class="st" style="margin-top:0;">Resumen de su solicitud</p>';
     $o .= $products_html;
     $o .= '<p class="st">Transporte</p>';
     $o .= $shipping_html;
     if ( $message ) {
-        $o .= '<p class="st">Tu mensaje</p>';
+        $o .= '<p class="st">Su mensaje</p>';
         $o .= '<p style="font-size:14px;color:#374151;font-style:italic;margin:0;">' . nl2br(esc_html($message)) . '</p>';
     }
     $o .= '</div>';
@@ -1079,16 +1115,16 @@ function silversea_email_template( $quote_id, $data, $products_html, $shipping_h
         $o .= '<td class="tval">€ ' . $total_str . ' <span class="tiva">+ IVA</span></td>';
         $o .= '</tr></table></div>';
     }
-    $o .= '<div class="ns"><p class="st" style="margin-top:0;">Nuestro equipo te contactará para</p>';
+    $o .= '<div class="ns"><p class="st" style="margin-top:0;">Nuestro equipo le contactará para</p>';
     $o .= '<ul><li>Confirmar disponibilidad en el depósito más cercano.</li>';
     $o .= '<li>Presentar la cotización definitiva.</li>';
-    $o .= '<li>Coordinar entrega, retirada o descarga.</li>';
+    $o .= '<li>Coordinar entrega, recogida o descarga.</li>';
     $o .= '<li>Resolver cualquier duda técnica o logística.</li></ul></div>';
     $o .= '<div class="ft"><p>';
     $o .= 'Esta solicitud no constituye una reserva. ';
     $o .= '<a href="https://www.silverseacontainers.com/terminos" style="color:#185FA5;">Términos y Condiciones</a>';
     $o .= '<br>Si necesitas asistencia inmediata: <a href="mailto:sales@silverseacontainers.com" style="color:#185FA5;">sales@silverseacontainers.com</a>';
-    $o .= '</p><p class="disc">' . esc_html($disclaimer) . '</p></div>';
+    $o .= '</p></div>';
     $o .= '</div></body></html>';
     return $o;
 }
@@ -1104,7 +1140,7 @@ function silversea_send_admin_email( $quote_id, $data ) {
     $email_debug     = get_option('silversea_admin_email', get_option('admin_email'));
 
     $subject_sales  = sprintf('[Silversea Ventas] Nueva cotización #%d – %s', $quote_id, $data['name']);
-    $subject_client = sprintf('[Silversea Containers] Tu solicitud de cotización #%d', $quote_id);
+    $subject_client = sprintf('[Silversea Containers] Su solicitud de cotización #%d', $quote_id);
 
     $headers_base = [
         'Content-Type: text/html; charset=UTF-8',
@@ -1116,10 +1152,11 @@ function silversea_send_admin_email( $quote_id, $data ) {
 
     /* ── Construir HTML de productos:
           Si raq_content tiene datos usarlo; si no, leer desde _sq_products meta ── */
-    $raq = $data['raq_content'] ?? [];
+    $raq        = $data['raq_content'] ?? [];
+    $price_city = silversea_derive_price_city( $data );
     $products_html_sales = ! empty($raq)
-        ? silversea_email_products_html( $raq, true )
-        : silversea_email_products_html_from_meta( $quote_id, true );
+        ? silversea_email_products_html( $raq, true, $price_city )
+        : silversea_email_products_html_from_meta( $quote_id, true, $price_city );
 
     $shipping_html_sales = silversea_email_shipping_html( $data, true );
 
@@ -1144,8 +1181,8 @@ function silversea_send_admin_email( $quote_id, $data ) {
         $to_client = $debug_mode ? $email_debug : $data['email'];
 
         $products_html_client = ! empty($raq)
-            ? silversea_email_products_html( $raq, $show_prices )
-            : silversea_email_products_html_from_meta( $quote_id, $show_prices );
+            ? silversea_email_products_html( $raq, $show_prices, $price_city )
+            : silversea_email_products_html_from_meta( $quote_id, $show_prices, $price_city );
 
         $shipping_html_client = silversea_email_shipping_html( $data, $show_prices );
 
@@ -1175,7 +1212,7 @@ function silversea_enqueue_raq_styles() {
     wp_enqueue_style(
         'silversea-raq',
         SILVERSEA_PLUGIN_URL . 'assets/css/silversea-raq.css',
-        [], '1.2.0'
+        [], SILVERSEA_VERSION
     );
 }
 
@@ -1194,7 +1231,7 @@ function silversea_require_quote_before_add( $is_valid, $product_id ) {
 
     if ( empty($sc) || empty($sc['method']) ) {
         wp_send_json_error([
-            'message' => 'Debés cotizar el envío antes de agregar este contenedor a tu selección.',
+            'message' => 'Debe cotizar el envío antes de añadir este contenedor a su selección.',
         ]);
         exit;
     }
