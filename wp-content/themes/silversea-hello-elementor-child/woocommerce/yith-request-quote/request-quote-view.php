@@ -8,8 +8,8 @@ if ( isset( $_REQUEST['sent'] ) ) return;
 
 if ( count( $raq_content ) === 0 ) : ?>
     <div class="silversea-raq-empty">
-        <p><?php esc_html_e( 'No hay productos en su selección.', 'yith-woocommerce-request-a-quote' ); ?></p>
-        <a href="<?php echo esc_url( home_url('tienda-de-contenedores') ); ?>" class="silversea-btn-outline">Ver contenedores</a>
+        <p><?php echo esc_html( function_exists('silversea_text') ? silversea_text('sel_empty_view') : 'No hay productos en su selección.' ); ?></p>
+        <a href="<?php echo esc_url( home_url('tienda-de-contenedores') ); ?>" class="silversea-btn-outline"><?php echo esc_html( function_exists('silversea_text') ? silversea_text('sel_btn_products') : 'Ver contenedores' ); ?></a>
     </div>
 <?php else :
 

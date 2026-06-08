@@ -208,7 +208,7 @@ function silversea_shortcode_quote_form( $atts ) {
 
             <?php /* - Listado informativo de productos - */ ?>
             <div class="silversea-form-product-summary">
-                <h3 class="silversea-form-summary-title">Su solicitud</h3>
+                <h3 class="silversea-form-summary-title"><?php echo esc_html(silversea_text('sel_form_title')); ?></h3>
                 <?php echo silversea_render_product_list($raq_content, false); ?>
             </div>
 
@@ -269,17 +269,17 @@ function silversea_shortcode_quote_form( $atts ) {
             <?php else : ?>
             <div class="silversea-already-quoted">
                 <div class="silversea-already-quoted-icon"></div>
-                <p class="silversea-already-quoted-title">Su solicitud ya fue enviada</p>
-                <p class="silversea-already-quoted-sub">En breve recibir&aacute; un correo con todos los detalles.</p>
+                <p class="silversea-already-quoted-title"><?php echo esc_html(silversea_text('sel_already_title')); ?></p>
+                <p class="silversea-already-quoted-sub"><?php echo esc_html(silversea_text('sel_already_sub')); ?></p>
             </div>
             <?php endif; ?>
 
         <?php else : ?>
             <div class="silversea-raq-empty">
-                <p>No hay productos en su selecci&oacute;n.</p>
+                <p><?php echo esc_html(silversea_text('sel_empty')); ?></p>
                 <?php if ( $view_url ) : ?>
                     <a href="<?php echo esc_url($view_url); ?>" class="silversea-btn-outline">
-                        Ver mi selecci&oacute;n
+                        <?php echo esc_html(silversea_text('sel_btn_view')); ?>
                     </a>
                 <?php endif; ?>
             </div>
@@ -343,7 +343,7 @@ function silversea_shortcode_thanks( $atts ) {
 
             <?php /* - Resumen de la orden - */ ?>
             <div class="silversea-thanks-section">
-                <h3 class="silversea-thanks-section-title">Resumen del pedido</h3>
+                <h3 class="silversea-thanks-section-title"><?php echo esc_html(silversea_text('thanks_order_title')); ?></h3>
                 <div class="silversea-product-list">
 
                 <?php if ( ! $use_products_array && ! empty($raq_content) ) :
@@ -409,7 +409,7 @@ function silversea_shortcode_thanks( $atts ) {
 
             <?php /* - Datos de contacto - */ ?>
             <div class="silversea-thanks-section">
-                <h3 class="silversea-thanks-section-title">Datos De Contacto</h3>
+                <h3 class="silversea-thanks-section-title"><?php echo esc_html(silversea_text('thanks_contact_title')); ?></h3>
                 <div class="silversea-thanks-contact">
                     <?php if ( $name )            echo '<p>' . esc_html($name) . '</p>'; ?>
                     <?php if ( $type )            echo '<p>' . ucfirst(esc_html($type)) . '</p>'; ?>

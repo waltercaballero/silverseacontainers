@@ -1231,7 +1231,7 @@ function silversea_require_quote_before_add( $is_valid, $product_id ) {
 
     if ( empty($sc) || empty($sc['method']) ) {
         wp_send_json_error([
-            'message' => 'Debe cotizar el envío antes de añadir este contenedor a su selección.',
+            'message' => silversea_text('msg_require_quote'),
         ]);
         exit;
     }

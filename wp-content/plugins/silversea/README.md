@@ -12,19 +12,20 @@ Plugin WordPress personalizado para Silversea Containers. Integra un cotizador d
 4. [Base de datos](#base-de-datos)
 5. [Configuración disponible](#configuración-disponible)
 6. [Ciudades / Depósitos](#ciudades--depósitos)
-7. [Widget del cotizador](#widget-del-cotizador)
-8. [Galería de colores](#galería-de-colores)
-9. [Lógica de cálculo](#lógica-de-cálculo)
-10. [Sesión y persistencia](#sesión-y-persistencia)
-11. [CPT silversea_quote](#cpt-silversea_quote)
-12. [Emails](#emails)
-13. [Integración Salesforce](#integración-salesforce)
-14. [Shortcodes de la página "Mi selección"](#shortcodes-de-la-página-mi-selección)
-15. [Extras (YITH WAPO)](#extras-yith-wapo)
-16. [Herramientas admin de productos](#herramientas-admin-de-productos)
-17. [Flujo completo del usuario](#flujo-completo-del-usuario)
-18. [Modo demo](#modo-demo)
-19. [FTP / Despliegue](#ftp--despliegue)
+7. [Textos editables](#textos-editables)
+8. [Widget del cotizador](#widget-del-cotizador)
+9. [Galería de colores](#galería-de-colores)
+10. [Lógica de cálculo](#lógica-de-cálculo)
+11. [Sesión y persistencia](#sesión-y-persistencia)
+12. [CPT silversea_quote](#cpt-silversea_quote)
+13. [Emails](#emails)
+14. [Integración Salesforce](#integración-salesforce)
+15. [Shortcodes de la página "Mi selección"](#shortcodes-de-la-página-mi-selección)
+16. [Extras (YITH WAPO)](#extras-yith-wapo)
+17. [Herramientas admin de productos](#herramientas-admin-de-productos)
+18. [Flujo completo del usuario](#flujo-completo-del-usuario)
+19. [Modo demo](#modo-demo)
+20. [FTP / Despliegue](#ftp--despliegue)
 
 ---
 
@@ -46,9 +47,11 @@ wp-content/plugins/silversea/
 │   ├── shipping-session.php               # AJAX save-shipping, CPT silversea_quote, emails.
 │   │                                      # Al inicio: require shipping-quote-calc.php + salesforce.php
 │   ├── shipping-quote-pages.php           # Shortcodes de la página YWRAQ
-│   └── salesforce.php                     # Integración Salesforce Web-to-Lead:
-│                                          # envío, mapeo de tipos, página de mapeo en lote,
-│                                          # meta box en cotizaciones, re-envío manual
+│   ├── salesforce.php                     # Integración Salesforce Web-to-Lead:
+│   │                                      # envío, mapeo de tipos, página de mapeo en lote,
+│   │                                      # meta box en cotizaciones, re-envío manual
+│   └── texts.php                          # Textos editables al cliente: registro de defaults,
+│                                          # helper silversea_text(), página admin "📝 Textos"
 └── assets/
     ├── js/
     │   ├── shipping-calculator.js         # Widget cotizador (frontend)
@@ -78,9 +81,11 @@ El plugin crea una estructura de menú propia en el panel de WordPress:
 ```
 💰 Cotizador                  → Configuración general + importación de tarifas
    ├── Configuración
+   ├── 🏙 Precios Ciudad       → Precio del contenedor por ciudad (en lote)
    ├── € Precios              → Editor masivo de precios
    ├── ↕ Ordenar             → Reordenador drag & drop de productos
-   └── Salesforce            → Mapeo en lote producto → ContainerType
+   ├── Salesforce            → Mapeo en lote producto → ContainerType
+   └── 📝 Textos             → Edición de los textos mostrados al cliente
    
 📋 Cotizaciones              → Listado del CPT silversea_quote (leads guardados)
    ├── Todas las cotizaciones
@@ -158,6 +163,30 @@ silversea_origin_label($key)          // 'barcelona' → 'Barcelona'
 
 ---
 
+## Textos editables
+
+**Archivo:** `includes/texts.php`
+**Ruta admin:** Cotizador → 📝 Textos
+
+Todos los textos mostrados al cliente (botones, labels, tooltips, avisos, validaciones, mensajes de error, página "Mi selección" y "Gracias") se editan desde el admin **sin tocar código**. Se permite HTML básico (negritas, enlaces, saltos de línea). Un campo vacío vuelve a su valor por defecto.
+
+### Cómo funciona
+
+- **Registro de defaults:** `silversea_text_defaults()` define cada texto como `clave => [grupo, etiqueta, tipo, default]`.
+- **Almacenamiento:** opción `silversea_texts` (array `clave => valor`), saneada con `wp_kses_post`.
+- **Lectura en PHP:** `silversea_text('clave')` devuelve el valor guardado o el default.
+- **Lectura en JS:** los textos viajan en `silvSea.texts` (vía `wp_localize_script`). El helper `scT('clave', fallback)` los lee con respaldo al texto por defecto, de modo que el frontend nunca queda vacío.
+- Algunos textos usan placeholders `sprintf`, p. ej. `msg_no_tarifa` → `%1$s` = CP, `%2$s` = ciudad.
+
+### Agregar nuevos textos (p. ej. emails)
+
+1. Sumar una entrada a `silversea_text_defaults()` con su grupo/etiqueta/default.
+2. Reemplazar el literal en el código por `silversea_text('clave')` (PHP) o `scT('clave', '…')` (JS).
+
+Los emails al cliente **todavía no** están integrados al editor (su plantilla es HTML completo); se pueden sumar con el mismo mecanismo cuando se decida.
+
+---
+
 ## Widget del cotizador
 
 **Shortcode:** `[silversea_shipping mode="single"]` o `[silversea_shipping mode="consolidated"]`
@@ -170,12 +199,14 @@ silversea_origin_label($key)          // 'barcelona' → 'Barcelona'
 
 | Panel | Método | Descripción |
 |-------|--------|-------------|
-| Retiro | `pickup` | Ciudad de retiro (depósitos con modo pickup). Sin costo. |
+| Recogida | `pickup` | Ciudad de recogida (depósitos con modo pickup). Sin coste. |
 | Entrega | `delivery` | Ciudad de salida + CP destino + tipo transporte (sin/con descarga). |
+
+> Todos los textos de los paneles son editables desde **Cotizador → 📝 Textos**.
 
 ### Aviso de volumen
 
-En modo `single`, se muestra un banner azul: _"¿Necesitas más de 7 contenedores? → sales@silverseacontainers.com"_
+En modo `single`, se muestra un banner azul: _"¿Necesita más de 7 contenedores? → sales@silverseacontainers.com"_ (editable como `bulk_notice`).
 
 ### AJAX handlers
 
@@ -514,6 +545,7 @@ Todos los CSS/JS se encolan con la constante **`SILVERSEA_VERSION`** (definida e
 | `includes/shipping-session.php` | Sesión, CPT, emails |
 | `includes/shipping-quote-pages.php` | Shortcodes página selección |
 | `includes/salesforce.php` | Integración Salesforce completa |
+| `includes/texts.php` | Textos editables al cliente + página admin "📝 Textos" |
 | `assets/js/shipping-calculator.js` | Widget JS frontend |
 | `assets/js/color-gallery.js` | Filtro de galería por color |
 | `assets/css/shipping-calculator.css` | Estilos widget |

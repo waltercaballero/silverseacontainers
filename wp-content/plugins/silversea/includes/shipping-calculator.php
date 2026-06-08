@@ -16,7 +16,9 @@ if ( ! defined( 'SILVERSEA_PLUGIN_DIR' ) )
 /* Versión única para cache-busting de todos los assets (JS/CSS).
    Subir este número cuando se modifique cualquier archivo de assets. */
 if ( ! defined( 'SILVERSEA_VERSION' ) )
-    define( 'SILVERSEA_VERSION', '2.0.0' );
+    define( 'SILVERSEA_VERSION', '2.1.0' );
+
+require_once __DIR__ . '/texts.php';
 
 /* ══ 1. TABLA ══════════════════════════════════════════════ */
 
@@ -704,11 +706,12 @@ function silversea_shipping_shortcode( $atts = [] ) {
         'extras'          => $extras_data,
         'cities'           => silversea_get_cities(),
         'productCityPrices'=> $city_prices,
+        'texts'            => silversea_texts_all(),
     ]);
 
-    $tooltip_retiro    = 'Seleccione la ciudad más cercana al domicilio de entrega del contenedor';
-    $tooltip_salida    = 'Seleccione la ciudad más cercana al domicilio de entrega del contenedor';
-    $tooltip_transport = '"con descarga": SILVERSEA proporciona el camión que incluye grúa con descarga del contenedor en la ubicación precisa donde se requiere' . "\n\n" . '"sin descarga": SILVERSEA proporciona el transporte del contenedor y deberá hacerse cargo de los medios para descargarlo en la ubicación requerida';
+    $tooltip_retiro    = silversea_text('tooltip_pickup');
+    $tooltip_salida    = silversea_text('tooltip_origin');
+    $tooltip_transport = silversea_text('tooltip_transport');
 
     ob_start(); ?>
     <div class="sc-wrap"><div class="sc-card">
@@ -716,7 +719,7 @@ function silversea_shipping_shortcode( $atts = [] ) {
       <?php if ( $mode === 'single' ) : ?>
       <div class="sc-qty-row">
         <div class="sc-qty-group">
-          <span class="sc-qty-label">Cantidad</span>
+          <span class="sc-qty-label"><?php echo esc_html(silversea_text('qty_label')); ?></span>
           <div class="sc-qty-ctrl">
             <button class="sc-qty-btn" onclick="scQty(-1)" aria-label="Reducir">−</button>
             <span class="sc-qty-val" id="scQtyVal">1</span>
@@ -730,17 +733,13 @@ function silversea_shipping_shortcode( $atts = [] ) {
       </div>
       <div class="sc-bulk-notice">
         <span class="sc-bulk-notice-icon">?</span>
-        <div>
-          <strong>¿Necesita más de 7 contenedores?</strong><br>
-          Póngase en contacto con nuestro equipo comercial enviando un correo a
-          <a href="mailto:sales@silverseacontainers.com">sales@silverseacontainers.com</a>
-        </div>
+        <div><?php echo silversea_text('bulk_notice'); ?></div>
       </div>
       <?php endif; ?>
 
       <?php if ( $mode === 'consolidated' && ! empty($items_summary) ) : ?>
       <div class="sc-items-summary">
-        <p class="sc-title">Tu selecci&oacute;n</p>
+        <p class="sc-title"><?php echo esc_html(silversea_text('items_summary_title')); ?></p>
         <div class="sc-items-list">
           <?php foreach ( $items_summary as $item ) : ?>
             <div class="sc-item-row">
@@ -753,20 +752,20 @@ function silversea_shipping_shortcode( $atts = [] ) {
       <?php endif; ?>
 
       <!-- <div class="sc-divider"></div> -->
-      <p class="sc-title">Método de entrega</p>
+      <p class="sc-title"><?php echo esc_html(silversea_text('method_title')); ?></p>
       <div class="sc-toggle" id="methodToggle">
-        <button class="sc-toggle-btn" data-method="delivery" onclick="scSetMethod('delivery')"><span class="dot"></span> Con entrega</button>
-        <button class="sc-toggle-btn active" data-method="pickup"   onclick="scSetMethod('pickup')"><span class="dot"></span> A recoger</button>
+        <button class="sc-toggle-btn" data-method="delivery" onclick="scSetMethod('delivery')"><span class="dot"></span> <?php echo esc_html(silversea_text('btn_delivery')); ?></button>
+        <button class="sc-toggle-btn active" data-method="pickup"   onclick="scSetMethod('pickup')"><span class="dot"></span> <?php echo esc_html(silversea_text('btn_pickup')); ?></button>
       </div>
 
       <div id="scPickupPanel">
         <div class="sc-field">
           <label class="sc-label" for="scPickupCity">
-            Ciudad de recogida
+            <?php echo esc_html(silversea_text('pickup_city_label')); ?>
             <span class="sc-tooltip-trigger" data-tip="<?php echo esc_attr($tooltip_retiro); ?>">?</span>
           </label>
           <select class="sc-select" id="scPickupCity" onchange="scPickupCityChanged()">
-            <option value="">Seleccione una ciudad</option>
+            <option value=""><?php echo esc_html(silversea_text('pickup_select_default')); ?></option>
             <?php foreach ( silversea_get_cities_for_mode('pickup') as $city ) : ?>
               <option value="<?php echo esc_attr($city['key']); ?>"><?php echo esc_html($city['name'] . ' — ' . $city['depot']); ?></option>
             <?php endforeach; ?>
@@ -775,25 +774,25 @@ function silversea_shipping_shortcode( $atts = [] ) {
         </div>
         <div id="scPickupInfo" class="sc-tip sc-hidden">
           <span class="sc-tip-icon">ⓘ</span>
-          <span>El contenedor estará disponible en un plazo estimado de <strong>5 días hábiles</strong>. La recogida en depósito no tiene coste adicional.</span>
+          <span><?php echo silversea_text('pickup_info'); ?></span>
         </div>
         <?php if ( $mode === 'single' && ! empty($extras_data) ) : ?>
         <div class="sc-extras-section">
-          <p class="sc-title">Extras disponibles</p>
+          <p class="sc-title"><?php echo esc_html(silversea_text('extras_title')); ?></p>
           <div class="sc-extras-grid"></div>
         </div>
         <?php endif; ?>
-        <button class="sc-btn-continue sc-hidden" id="scContinueBtn" onclick="scContinue()">Guardar preferencia de recogida</button>
+        <button class="sc-btn-continue sc-hidden" id="scContinueBtn" onclick="scContinue()"><?php echo esc_html(silversea_text('btn_continue')); ?></button>
       </div>
 
       <div id="scDeliveryPanel" class="sc-hidden">
         <div class="sc-field">
           <label class="sc-label" for="scOriginCity">
-            Ciudad de salida
+            <?php echo esc_html(silversea_text('origin_label')); ?>
             <span class="sc-tooltip-trigger" data-tip="<?php echo esc_attr($tooltip_salida); ?>">?</span>
           </label>
           <select class="sc-select" id="scOriginCity" onchange="scSuggestTransport()">
-            <option value="">Seleccione ciudad de origen</option>
+            <option value=""><?php echo esc_html(silversea_text('origin_select_default')); ?></option>
             <?php foreach ( silversea_get_cities_for_mode('delivery') as $city ) : ?>
               <option value="<?php echo esc_attr($city['key']); ?>"><?php echo esc_html($city['name'] . ' — ' . $city['depot']); ?></option>
             <?php endforeach; ?>
@@ -801,18 +800,18 @@ function silversea_shipping_shortcode( $atts = [] ) {
           <div id="scDepositoInfoDelivery" class="sc-deposito-info sc-hidden"></div>
         </div>
         <div class="sc-field">
-          <label class="sc-label" for="scPostalCode">Código postal de destino</label>
-          <input type="text" class="sc-input" id="scPostalCode" placeholder="Ej. 28001" maxlength="5"
+          <label class="sc-label" for="scPostalCode"><?php echo esc_html(silversea_text('cp_label')); ?></label>
+          <input type="text" class="sc-input" id="scPostalCode" placeholder="<?php echo esc_attr(silversea_text('cp_placeholder')); ?>" maxlength="5"
                  oninput="this.value=this.value.replace(/\D/g,'');scSuggestTransport()" />
         </div>
         <div class="sc-field">
           <div class="sc-label">
-            Tipo de transporte
+            <?php echo esc_html(silversea_text('transport_label')); ?>
             <span class="sc-tooltip-trigger" data-tip="<?php echo esc_attr($tooltip_transport); ?>">?</span>
           </div>
           <div class="sc-size-toggle">
-            <button class="sc-size-btn active" data-transport="sin" onclick="scSetTransport('sin')">Sin descarga</button>
-            <button class="sc-size-btn"        data-transport="con" onclick="scSetTransport('con')">Con descarga</button>
+            <button class="sc-size-btn active" data-transport="sin" onclick="scSetTransport('sin')"><?php echo esc_html(silversea_text('transport_sin')); ?></button>
+            <button class="sc-size-btn"        data-transport="con" onclick="scSetTransport('con')"><?php echo esc_html(silversea_text('transport_con')); ?></button>
           </div>
         </div>
         <div id="scTransportTip" class="sc-tip sc-hidden">
@@ -820,20 +819,20 @@ function silversea_shipping_shortcode( $atts = [] ) {
         </div>
         <?php if ( $mode === 'single' && ! empty($extras_data) ) : ?>
         <div class="sc-extras-section">
-          <p class="sc-title">Extras disponibles</p>
+          <p class="sc-title"><?php echo esc_html(silversea_text('extras_title')); ?></p>
           <div class="sc-extras-grid"></div>
         </div>
         <?php endif; ?>
 
         <button class="sc-btn-calc" id="scCalcBtn" onclick="scCalculate()">
-          <?php echo $mode === 'consolidated' ? 'Calcular precio de envío total' : 'Calcular precio de envío'; ?>
+          <?php echo esc_html( $mode === 'consolidated' ? silversea_text('btn_calc_consolidated') : silversea_text('btn_calc_single') ); ?>
         </button>
-        <div id="scLoaderArea" class="sc-loader sc-hidden">Calculando...</div>
+        <div id="scLoaderArea" class="sc-loader sc-hidden"><?php echo esc_html(silversea_text('loader')); ?></div>
         <div id="scErrorArea"  class="sc-error  sc-hidden"></div>
         <div id="scResultArea" class="sc-hidden">
           <div class="sc-result">
             <div class="sc-result-row">
-              <span class="sc-result-label">Coste de envío estimado</span>
+              <span class="sc-result-label"><?php echo esc_html(silversea_text('result_label')); ?></span>
               <span id="scResultPrice" class="sc-result-price"></span>
             </div>
             <div id="scResultDetail"    class="sc-result-detail"></div>
@@ -860,7 +859,7 @@ function silversea_shipping_ajax_calc() {
     $method = sanitize_key($_POST['method']??'');
     $transp = in_array($_POST['transport']??'',['sin','con'])?$_POST['transport']:'sin';
 
-    if ($method==='pickup') wp_send_json_success(['free'=>true,'price'=>0,'detail'=>'Recogida en depósito sin coste adicional.','days'=>5]);
+    if ($method==='pickup') wp_send_json_success(['free'=>true,'price'=>0,'detail'=>silversea_text('msg_pickup_free'),'days'=>5]);
     if ($method!=='delivery') wp_send_json_error(['message'=>'Método inválido.']);
 
     $origin       = sanitize_key($_POST['origin']??'');
@@ -873,7 +872,7 @@ function silversea_shipping_ajax_calc() {
 
     global $wpdb; $table=$wpdb->prefix.'silversea_tarifas';
     $row=silversea_find_tarifa_row($origin,$cp);
-    if (!$row) wp_send_json_error(['message'=>"No encontramos tarifa para el CP {$cp} desde " . silversea_origin_label($origin) . '. Contáctenos para una cotización personalizada.']);
+    if (!$row) wp_send_json_error(['message'=>sprintf( silversea_text('msg_no_tarifa'), $cp, silversea_origin_label($origin) )]);
 
     $units_per=$product_size===10?1:($product_size===20?2:4);
     $trucks=(int)ceil(($units_per*$quantity)/4);
@@ -964,7 +963,7 @@ function silversea_shipping_ajax_calc_consolidated() {
     $origin = sanitize_key($_POST['origin']??'');
     $cp     = preg_replace('/\D/','', $_POST['postal_code']??'');
 
-    if ($method==='pickup') wp_send_json_success(['free'=>true,'price'=>0,'detail'=>'Recogida en depósito sin coste adicional.','days'=>5]);
+    if ($method==='pickup') wp_send_json_success(['free'=>true,'price'=>0,'detail'=>silversea_text('msg_pickup_free'),'days'=>5]);
 
     $raq_content = silversea_get_raq_content();
     if (empty($raq_content)) wp_send_json_error(['message'=>'No hay productos en la selección.']);
@@ -1015,7 +1014,7 @@ add_action('wp_footer', function() {
                 .then(function(){ window.location.reload(); })
                 .catch(function(){
                     if(row){row.style.opacity='1';row.style.pointerEvents='';}
-                    alert('Error al eliminar. Inténtelo de nuevo.');
+                    alert('<?php echo esc_js( silversea_text('msg_delete_error') ); ?>');
                 });
             }, true);
         });

@@ -1,4 +1,12 @@
 /* shipping-calculator.js  v1.4.0 */
+
+/* Textos editables desde el admin (Cotizador → 📝 Textos).
+   Lee silvSea.texts[key]; si no existe usa el fallback (texto por defecto). */
+function scT(key, fallback) {
+  var t = (typeof silvSea !== 'undefined' && silvSea.texts) ? silvSea.texts[key] : null;
+  return (t !== undefined && t !== null && t !== '') ? t : fallback;
+}
+
 (function () {
   "use strict";
 
@@ -158,7 +166,7 @@
     /* Sincronizar hidden fields del form de cotización */
     scSyncFormFields({ method: "pickup", origin: "", cp: "", transport: "", price: 0, pickup: city });
     var btn = document.getElementById("scContinueBtn");
-    btn.textContent = "\u2713 Recogida guardada"; btn.disabled = true; btn.style.background = "#1D9E75";
+    btn.textContent = scT('msg_pickup_saved', "\u2713 Recogida guardada"); btn.disabled = true; btn.style.background = "#1D9E75";
   };
 
   /*  ENTREGA  */
@@ -178,7 +186,7 @@
     if (window.scUpdateProductPrice) window.scUpdateProductPrice(origin);
     if (origin && postal.length >= 4) {
       tip.classList.remove("sc-hidden");
-      tipText.innerHTML = "Recomendamos <strong>sin descarga</strong> si dispone de medios propios en destino (precio menor). Elija <strong>con descarga</strong> si necesita que el cami\u00f3n incluya gr\u00faa.";
+      tipText.innerHTML = scT('transport_tip', "Recomendamos <strong>sin descarga</strong> si dispone de medios propios en destino (precio menor). Elija <strong>con descarga</strong> si necesita que el cami\u00f3n incluya gr\u00faa.");
     } else tip.classList.add("sc-hidden");
     scClearResult();
   };
@@ -225,8 +233,8 @@
       /* showFront desactivado — mostrar confirmación neutral sin precio */
       area.classList.remove("sc-hidden");
       priceEl.className = "sc-result-free";
-      priceEl.textContent = "✓ Cotización guardada";
-      detailEl.textContent = "Recibirá el detalle por email.";
+      priceEl.textContent = scT('msg_quote_saved', "✓ Cotización guardada");
+      detailEl.textContent = scT('msg_quote_saved_sub', "Recibirá el detalle por email.");
       breakEl.classList.add("sc-hidden");
       daysEl.classList.add("sc-hidden");
     }
@@ -392,8 +400,8 @@
   function scValidate() {
     var origin = document.getElementById("scOriginCity").value;
     var postal = document.getElementById("scPostalCode").value;
-    if (!origin) { scShowError("Por favor, seleccione la ciudad de salida."); return false; }
-    if (!postal || postal.length < 5) { scShowError("Introduzca un c\u00f3digo postal v\u00e1lido (5 d\u00edgitos)."); return false; }
+    if (!origin) { scShowError(scT('msg_err_select_origin', "Por favor, seleccione la ciudad de salida.")); return false; }
+    if (!postal || postal.length < 5) { scShowError(scT('msg_err_invalid_cp', "Introduzca un c\u00f3digo postal v\u00e1lido (5 d\u00edgitos).")); return false; }
     return true;
   }
 
@@ -412,7 +420,7 @@
         } catch (e) {
           /* El servidor devolvió algo que no es JSON (warning PHP, HTML de error, etc.) */
           console.error("[Silversea] Respuesta no-JSON del servidor (HTTP " + httpStatus + "):\n" + text);
-          scShowError("El servidor devolvió una respuesta inesperada. Recargue la página e inténtelo de nuevo.");
+          scShowError(scT('msg_err_server', "El servidor devolvió una respuesta inesperada. Recargue la página e inténtelo de nuevo."));
           return;
         }
         if (data && data.success) {
@@ -420,12 +428,12 @@
         } else {
           scShowError(data && data.data && data.data.message
             ? data.data.message
-            : "Error al calcular. Inténtelo de nuevo.");
+            : scT('msg_err_calc', "Error al calcular. Inténtelo de nuevo."));
         }
       })
       .catch(function (err) {
         console.error("[Silversea] Falló la conexión AJAX:", err);
-        scShowError("Error de conexión. Inténtelo de nuevo.");
+        scShowError(scT('msg_err_conn', "Error de conexión. Inténtelo de nuevo."));
       });
   }
 
@@ -604,7 +612,7 @@ function scShowDeposito(city, infoId) {
       + 'background:#0F2557;color:#fff;padding:14px 24px;border-radius:10px;'
       + 'font-size:14px;font-weight:500;z-index:99999;box-shadow:0 4px 16px rgba(0,0,0,.2);'
       + 'max-width:90vw;text-align:center;';
-    msg.textContent = 'Cotice el envío antes de añadir este contenedor a su selección.';
+    msg.textContent = scT('msg_require_quote', 'Cotice el envío antes de añadir este contenedor a su selección.');
     document.body.appendChild(msg);
 
     setTimeout(function() { if ( msg.parentNode ) msg.remove(); }, 3500);
@@ -892,7 +900,7 @@ function scShowDeposito(city, infoId) {
       + 'background:#dc2626;color:#fff;padding:14px 24px;border-radius:10px;'
       + 'font-size:14px;font-weight:500;z-index:99999;box-shadow:0 4px 16px rgba(0,0,0,.2);'
       + 'max-width:90vw;text-align:center;';
-    msg.textContent = 'Seleccione un color RAL antes de añadir a su selección.';
+    msg.textContent = scT('msg_color_required', 'Seleccione un color RAL antes de añadir a su selección.');
     document.body.appendChild(msg);
     setTimeout(function () { if (msg.parentNode) msg.remove(); }, 3500);
   }
