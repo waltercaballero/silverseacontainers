@@ -238,7 +238,9 @@ function scT(key, fallback) {
       breakEl.classList.add("sc-hidden");
       daysEl.classList.add("sc-hidden");
     }
-    if (currentMethod === "delivery" && data.price > 0) {
+    if (currentMethod === "delivery") {
+      /* Guardar en sesión siempre que sea delivery — aunque price=0 —
+         para evitar que persista una sesión vieja de retiro (pickup). */
       var sd = new FormData();
       sd.append("action", "silversea_save_shipping");
       sd.append("nonce", typeof silvSea !== "undefined" ? silvSea.nonce : "");
@@ -246,11 +248,11 @@ function scT(key, fallback) {
       sd.append("origin", document.getElementById("scOriginCity").value);
       sd.append("postal_code", document.getElementById("scPostalCode").value);
       sd.append("transport", currentTransport);
-      sd.append("price", data.price); sd.append("detail", data.detail || "");
+      sd.append("price", data.price || 0); sd.append("detail", data.detail || "");
       sd.append("trucks", data.trucks || 1); sd.append("days", data.days || 5);
       fetch(typeof silvSea !== "undefined" ? silvSea.ajaxUrl : "/wp-admin/admin-ajax.php", { method: "POST", body: sd });
       /* Sincronizar hidden fields del form de cotización */
-      scSyncFormFields({ method: "delivery", origin: document.getElementById("scOriginCity").value, cp: document.getElementById("scPostalCode").value, transport: currentTransport, price: data.price, pickup: "" });
+      scSyncFormFields({ method: "delivery", origin: document.getElementById("scOriginCity").value, cp: document.getElementById("scPostalCode").value, transport: currentTransport, price: data.price || 0, pickup: "" });
     }
   }
 
@@ -424,7 +426,11 @@ function scT(key, fallback) {
           return;
         }
         if (data && data.success) {
-          scShowResult(data.data);
+          if (data.data && data.data.no_tarifa) {
+            scShowNoTarifaFlow(data.data);
+          } else {
+            scShowResult(data.data);
+          }
         } else {
           scShowError(data && data.data && data.data.message
             ? data.data.message
@@ -435,6 +441,46 @@ function scT(key, fallback) {
         console.error("[Silversea] Falló la conexión AJAX:", err);
         scShowError(scT('msg_err_conn', "Error de conexión. Inténtelo de nuevo."));
       });
+  }
+
+  /*  CP SIN TARIFA — flujo alternativo  */
+  function scShowNoTarifaFlow(data) {
+    document.getElementById("scLoaderArea").classList.add("sc-hidden");
+    document.getElementById("scErrorArea").classList.add("sc-hidden");
+    document.getElementById("scCalcBtn").disabled = false;
+
+    var area    = document.getElementById("scResultArea");
+    var priceEl = document.getElementById("scResultPrice");
+    var detailEl= document.getElementById("scResultDetail");
+    var breakEl = document.getElementById("scResultBreakdown");
+    var daysEl  = document.getElementById("scResultDays");
+
+    area.classList.remove("sc-hidden");
+    priceEl.className   = "sc-result-free";
+    priceEl.textContent = scT('msg_no_tarifa_title', "Precio de transporte a confirmar");
+    detailEl.textContent= scT('msg_no_tarifa_body',
+      "Tu código postal no está en nuestra base de datos. Puedes continuar con tu solicitud: el equipo comercial te confirmará el precio de transporte.");
+    breakEl.classList.add("sc-hidden");
+    daysEl.classList.add("sc-hidden");
+
+    /* Guardar en sesión con price=0 para que el formulario de cotización lo recoja */
+    var origin = data.origin || (document.getElementById("scOriginCity") ? document.getElementById("scOriginCity").value : "");
+    var cp     = data.cp     || (document.getElementById("scPostalCode") ? document.getElementById("scPostalCode").value : "");
+    var sd = new FormData();
+    sd.append("action",       "silversea_save_shipping");
+    sd.append("nonce",        typeof silvSea !== "undefined" ? silvSea.nonce : "");
+    sd.append("method",       "delivery");
+    sd.append("origin",       origin);
+    sd.append("postal_code",  cp);
+    sd.append("transport",    currentTransport);
+    sd.append("price",        0);
+    sd.append("detail",       "CP sin tarifa");
+    fetch(typeof silvSea !== "undefined" ? silvSea.ajaxUrl : "/wp-admin/admin-ajax.php", { method: "POST", body: sd });
+
+    /* Sincronizar hidden fields del form y desbloquear "Añadir a selección" */
+    scSyncFormFields({ method: "delivery", origin: origin, cp: cp, transport: currentTransport, price: 0, pickup: "", no_tarifa: true });
+
+    setTimeout(function() { area.scrollIntoView({ behavior: "smooth", block: "nearest" }); }, 50);
   }
 
   /*  CALCULAR  */
@@ -568,8 +614,8 @@ function scShowDeposito(city, infoId) {
     /* Cuando se confirma una cotización nueva, habilitar el botón */
     document.addEventListener('silversea:shipping:saved', function(e) {
       var d = e.detail || {};
-      if ( d.method === 'pickup' && d.pickup )        { quoteConfirmedThisVisit = true; updateAddBtnState(true); }
-      if ( d.method === 'delivery' && d.price > 0 )   { quoteConfirmedThisVisit = true; updateAddBtnState(true); }
+      if ( d.method === 'pickup' && d.pickup )                          { quoteConfirmedThisVisit = true; updateAddBtnState(true); }
+      if ( d.method === 'delivery' && (d.price > 0 || d.no_tarifa) ) { quoteConfirmedThisVisit = true; updateAddBtnState(true); }
     });
 
     /* Interceptar el click en el botón YITH para mostrar mensaje si no hay cotización */
@@ -781,6 +827,13 @@ function scShowDeposito(city, infoId) {
       card.appendChild(desc);
     }
 
+    if (extra.price && extra.price > 0) {
+      var priceEl = document.createElement('span');
+      priceEl.className = 'sc-extra-price';
+      priceEl.textContent = 'Desde ' + extra.price.toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' €';
+      card.appendChild(priceEl);
+    }
+
     /* Card → sincronizar todos los grids + WAPO nativo */
     card.addEventListener('click', function () {
       var isSelected = !selectedValues[extra.value];
@@ -839,16 +892,24 @@ function scShowDeposito(city, infoId) {
     yithBtn.addEventListener('click', function () {
       form.querySelectorAll('.sc-extra-injected').forEach(function (el) { el.remove(); });
 
-      var wapoInCart = form.querySelector('#yith-wapo-container');
-      if (!wapoInCart) {
-        extras.forEach(function (extra) {
-          if (!selectedValues[extra.value]) return;
-          var inp = document.createElement('input');
-          inp.type = 'hidden'; inp.className = 'sc-extra-injected';
-          inp.name = extra.name; inp.value = extra.value;
-          form.appendChild(inp);
-        });
-      }
+      /* Siempre inyectar los extras seleccionados como campos ocultos.
+         silversea_intercept_wapo deduplica en el servidor, por lo que no
+         hay conflicto si YITH WAPO también envía sus propios campos. */
+      extras.forEach(function (extra) {
+        if (!selectedValues[extra.value]) return;
+        var inp = document.createElement('input');
+        inp.type = 'hidden'; inp.className = 'sc-extra-injected';
+        inp.name = extra.name; inp.value = extra.value;
+        form.appendChild(inp);
+        /* Inyectar también el precio del addon */
+        if (extra.price && extra.price > 0) {
+          var priceInp = document.createElement('input');
+          priceInp.type = 'hidden'; priceInp.className = 'sc-extra-injected';
+          priceInp.name = 'silversea_addon_price[' + extra.value + ']';
+          priceInp.value = extra.price;
+          form.appendChild(priceInp);
+        }
+      });
     }, true);
   });
 })();

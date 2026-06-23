@@ -39,11 +39,12 @@ add_action( 'wp_head', function() {
 	</style>
 	<?php
 
-	if ( is_shop() || is_product() || is_product_category() || is_product_tag() ) {
-		echo '<style>.lang-section { display: none !important; }</style>';
+	if ( function_exists( 'is_shop' ) && ( is_shop() || is_product() || is_product_category() || is_product_tag() ) ) {
+		add_action( 'wp_head', function() {
+			echo '<style>.lang-section { display: none !important; }</style>';
+		}, 99 );
 	}
 } );
-
 
 
 
@@ -880,4 +881,10 @@ function lcs_enviar_lead_a_salesforce($request) {
 
 /* Cotizador */
 
-require_once plugin_dir_path( __FILE__ ) . 'cotizador.php';
+add_action( 'plugins_loaded', 'silversea_cargar_cotizador' );
+
+function silversea_cargar_cotizador() {
+    if ( class_exists( 'WooCommerce' ) ) {
+        require_once plugin_dir_path( __FILE__ ) . 'cotizador.php';
+    }
+}

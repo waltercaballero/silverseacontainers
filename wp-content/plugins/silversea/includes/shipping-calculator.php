@@ -16,7 +16,7 @@ if ( ! defined( 'SILVERSEA_PLUGIN_DIR' ) )
 /* Versión única para cache-busting de todos los assets (JS/CSS).
    Subir este número cuando se modifique cualquier archivo de assets. */
 if ( ! defined( 'SILVERSEA_VERSION' ) )
-    define( 'SILVERSEA_VERSION', '2.1.0' );
+    define( 'SILVERSEA_VERSION', '2.3.0' );
 
 require_once __DIR__ . '/texts.php';
 
@@ -102,7 +102,7 @@ function silversea_shipping_admin_menu() {
     add_submenu_page(
         'silversea-cotizador',
         'Precios por Ciudad',
-        '🏙 Precios Ciudad',
+        'Precios Ciudad',
         'manage_woocommerce',
         'silversea-city-prices',
         'silversea_render_city_prices_page'
@@ -118,14 +118,19 @@ function silversea_shipping_admin_page() {
 
     if ( isset($_POST['silversea_cities_nonce'])
          && wp_verify_nonce($_POST['silversea_cities_nonce'], 'silversea_save_cities') ) {
-        $submitted_modes = $_POST['city_modes'] ?? [];
-        $updated_cities  = [];
-        foreach ( silversea_default_cities() as $default ) {
-            $key   = $default['key'];
-            $raw   = isset($submitted_modes[$key]) && is_array($submitted_modes[$key])
-                     ? $submitted_modes[$key] : [];
-            $modes = array_values( array_intersect( ['delivery','pickup'], $raw ) );
-            $updated_cities[] = array_merge( $default, ['modes' => $modes] );
+        $submitted_modes  = $_POST['city_modes']         ?? [];
+        $submitted_labels = $_POST['city_display_names'] ?? [];
+        $updated_cities   = [];
+        foreach ( silversea_get_cities() as $current ) {
+            $key          = $current['key'];
+            $raw          = isset($submitted_modes[$key]) && is_array($submitted_modes[$key])
+                            ? $submitted_modes[$key] : [];
+            $modes        = array_values( array_intersect( ['delivery','pickup'], $raw ) );
+            $display_name = sanitize_text_field( $submitted_labels[$key] ?? '' );
+            $updated_cities[] = array_merge( $current, [
+                'modes'        => $modes,
+                'display_name' => $display_name,
+            ] );
         }
         update_option( 'silversea_cities_config', $updated_cities );
         $message = 'Configuración de ciudades guardada.';
@@ -399,7 +404,7 @@ function silversea_shipping_admin_page() {
       <hr style="margin:20px 0;">
       <h3 style="margin:0 0 8px;">Vista previa</h3>
       <form method="get" style="margin-bottom:8px;">
-        <input type="hidden" name="page" value="silversea-tarifas">
+        <input type="hidden" name="page" value="silversea-cotizador">
         <select name="preview" onchange="this.form.submit()" style="min-width:160px;">
           <?php foreach ( silversea_get_cities_for_mode('delivery') as $city ) : ?>
             <option value="<?php echo esc_attr($city['key']); ?>" <?php selected($ciudad_preview, $city['key']); ?>><?php echo esc_html($city['name']); ?></option>
@@ -447,6 +452,7 @@ function silversea_shipping_admin_page() {
             <th style="padding:8px 12px;text-align:left;border:1px solid #ddd;">Ciudad</th>
             <th style="padding:8px 12px;text-align:left;border:1px solid #ddd;">Depósito</th>
             <th style="padding:8px 12px;text-align:left;border:1px solid #ddd;">Dirección</th>
+            <th style="padding:8px 12px;text-align:left;border:1px solid #ddd;">Nombre en desplegable</th>
             <th style="padding:8px 12px;text-align:center;border:1px solid #ddd;width:80px;">Entrega</th>
             <th style="padding:8px 12px;text-align:center;border:1px solid #ddd;width:80px;">Retiro</th>
           </tr>
@@ -457,6 +463,12 @@ function silversea_shipping_admin_page() {
               <td style="padding:8px 12px;border:1px solid #eee;font-weight:600;"><?php echo esc_html($city['name']); ?></td>
               <td style="padding:8px 12px;border:1px solid #eee;"><?php echo esc_html($city['depot']); ?></td>
               <td style="padding:8px 12px;border:1px solid #eee;color:#555;"><?php echo esc_html($city['address']); ?></td>
+              <td style="padding:8px 12px;border:1px solid #eee;">
+                <input type="text" name="city_display_names[<?php echo esc_attr($city['key']); ?>]"
+                  value="<?php echo esc_attr($city['display_name'] ?? ''); ?>"
+                  placeholder="<?php echo esc_attr($city['name'] . ' — ' . $city['depot']); ?>"
+                  style="width:100%;max-width:220px;padding:4px 8px;border:1px solid #d1d5db;border-radius:4px;font-size:13px;">
+              </td>
               <td style="padding:8px 12px;border:1px solid #eee;text-align:center;">
                 <input type="checkbox" name="city_modes[<?php echo esc_attr($city['key']); ?>][]" value="delivery"
                   <?php checked(in_array('delivery', $city['modes'], true)); ?>>
@@ -521,32 +533,115 @@ function silversea_shipping_parse_json($filepath) {
 }
 
 function silversea_shipping_parse_xlsx($filepath) {
-    $rows = [];
     if (!class_exists('ZipArchive')) return new WP_Error('no_zip','ZipArchive no disponible.');
     $zip = new ZipArchive();
     if ($zip->open($filepath)!==true) return new WP_Error('bad_zip','No se pudo abrir el XLSX.');
-    $strings=[]; $ss_xml=$zip->getFromName('xl/sharedStrings.xml');
-    if ($ss_xml) { $ss_dom=new SimpleXMLElement($ss_xml);
-        foreach($ss_dom->si as $si) { if(isset($si->t)){$strings[]=(string)$si->t;}
-            else{$val='';foreach($si->r as $r)$val.=(string)$r->t;$strings[]=$val;} } }
-    $sheet_xml=$zip->getFromName('xl/worksheets/sheet1.xml'); $zip->close();
-    if (!$sheet_xml) return $rows;
-    $sheet=new SimpleXMLElement($sheet_xml); $line_num=0;
-    foreach($sheet->sheetData->row as $row_xml) {
-        $line_num++; $cells=[];
-        foreach($row_xml->c as $cell) {
-            $col_index=silversea_shipping_col_to_index(preg_replace('/[0-9]/','_',(string)$cell['r']));
-            $val_raw=isset($cell->v)?(string)$cell->v:'';
-            $cells[$col_index]=((string)$cell['t']==='s')?($strings[(int)$val_raw]??''):$val_raw;
+
+    /* Detectar número de hojas leyendo el workbook */
+    $sheet_files = [];
+    $wb_xml = $zip->getFromName('xl/workbook.xml');
+    if ($wb_xml) {
+        $wb = new SimpleXMLElement($wb_xml);
+        $wb->registerXPathNamespace('r', 'http://schemas.openxmlformats.org/officeDocument/2006/relationships');
+        /* Contar sheets por orden */
+        foreach ($wb->sheets->sheet as $s) {
+            $sheet_files[] = (string)$s['name'];
         }
-        if ($line_num===1&&!is_numeric(trim($cells[0]??''))) continue;
-        $cp=trim($cells[0]??''); if($cp==='') continue;
-        $rows[]=['cp_destino'=>$cp,'municipio_destino'=>trim($cells[1]??''),'km'=>(int)trim($cells[3]??0),
+    }
+    /* Fallback: detectar por archivos presentes */
+    if (empty($sheet_files)) {
+        for ($i = 1; $i <= 10; $i++) {
+            if ($zip->getFromName("xl/worksheets/sheet{$i}.xml") !== false) $sheet_files[] = "sheet{$i}";
+            else break;
+        }
+    }
+
+    /* Cargar shared strings una sola vez */
+    $strings = [];
+    $ss_xml = $zip->getFromName('xl/sharedStrings.xml');
+    if ($ss_xml) {
+        $ss_dom = new SimpleXMLElement($ss_xml);
+        foreach ($ss_dom->si as $si) {
+            if (isset($si->t)) { $strings[] = (string)$si->t; }
+            else { $val=''; foreach($si->r as $r) $val.=(string)$r->t; $strings[]=$val; }
+        }
+    }
+
+    $num_sheets = count($sheet_files);
+
+    /* ── FORMATO NUEVO: 2 hojas ── */
+    if ($num_sheets >= 2) {
+        $sheet1_xml = $zip->getFromName('xl/worksheets/sheet1.xml');
+        $sheet2_xml = $zip->getFromName('xl/worksheets/sheet2.xml');
+        $zip->close();
+        if (!$sheet1_xml || !$sheet2_xml) return [];
+
+        /* Hoja 1: CP → precio_sin */
+        $sin_map = [];
+        $sheet1 = new SimpleXMLElement($sheet1_xml);
+        foreach ($sheet1->sheetData->row as $row_xml) {
+            $cells = silversea_xlsx_read_row($row_xml, $strings);
+            $cp = silversea_normalize_cp(trim($cells[0] ?? ''));
+            if (!$cp) continue;
+            $sin_map[$cp] = silversea_shipping_parse_price($cells[1] ?? 0);
+        }
+
+        /* Hoja 2: CP → con_20, con_40 */
+        $con_map = [];
+        $sheet2 = new SimpleXMLElement($sheet2_xml);
+        foreach ($sheet2->sheetData->row as $row_xml) {
+            $cells = silversea_xlsx_read_row($row_xml, $strings);
+            $cp = silversea_normalize_cp(trim($cells[0] ?? ''));
+            if (!$cp) continue;
+            $con_map[$cp] = [
+                silversea_shipping_parse_price($cells[1] ?? 0),
+                silversea_shipping_parse_price($cells[2] ?? 0),
+            ];
+        }
+
+        /* Unión de CPs */
+        $all_cps = array_unique(array_merge(array_keys($sin_map), array_keys($con_map)));
+        $rows = [];
+        foreach ($all_cps as $cp) {
+            $rows[] = [
+                'cp_destino'         => $cp,
+                'municipio_destino'  => '',
+                'km'                 => 0,
+                'precio_sin_descarga'=> $sin_map[$cp] ?? 0.0,
+                'precio_con_desc_20' => $con_map[$cp][0] ?? 0.0,
+                'precio_con_desc_40' => $con_map[$cp][1] ?? 0.0,
+            ];
+        }
+        return $rows;
+    }
+
+    /* ── FORMATO LEGACY: 1 hoja ── */
+    $sheet_xml = $zip->getFromName('xl/worksheets/sheet1.xml');
+    $zip->close();
+    if (!$sheet_xml) return [];
+    $sheet = new SimpleXMLElement($sheet_xml); $line_num = 0; $rows = [];
+    foreach ($sheet->sheetData->row as $row_xml) {
+        $line_num++;
+        $cells = silversea_xlsx_read_row($row_xml, $strings);
+        if ($line_num===1 && !is_numeric(trim($cells[0]??''))) continue;
+        $cp = trim($cells[0]??''); if ($cp==='') continue;
+        $rows[] = ['cp_destino'=>$cp,'municipio_destino'=>trim($cells[1]??''),'km'=>(int)trim($cells[3]??0),
             'precio_sin_descarga'=>silversea_shipping_parse_price($cells[4]??0),
             'precio_con_desc_20'=>silversea_shipping_parse_price($cells[5]??0),
             'precio_con_desc_40'=>silversea_shipping_parse_price($cells[7]??0)];
     }
     return $rows;
+}
+
+/** Lee una fila XML de un sheet XLSX y devuelve array indexado por columna (0-based). */
+function silversea_xlsx_read_row($row_xml, $strings) {
+    $cells = [];
+    foreach ($row_xml->c as $cell) {
+        $col_index = silversea_shipping_col_to_index(preg_replace('/[0-9]/','_',(string)$cell['r']));
+        $val_raw   = isset($cell->v) ? (string)$cell->v : '';
+        $cells[$col_index] = ((string)$cell['t']==='s') ? ($strings[(int)$val_raw]??'') : $val_raw;
+    }
+    return $cells;
 }
 
 function silversea_shipping_col_to_index($col) {
@@ -665,6 +760,7 @@ function silversea_shipping_shortcode( $atts = [] ) {
                                     'label' => $label,
                                     'desc'  => $opts['description'][ $x ] ?? '',
                                     'icon'  => $img_id ? wp_get_attachment_image_url( (int) $img_id, [48, 48] ) : '',
+                                    'price' => (float)( $opts['price'][ $x ] ?? 0 ),
                                 ];
                             }
                         }
@@ -767,7 +863,7 @@ function silversea_shipping_shortcode( $atts = [] ) {
           <select class="sc-select" id="scPickupCity" onchange="scPickupCityChanged()">
             <option value=""><?php echo esc_html(silversea_text('pickup_select_default')); ?></option>
             <?php foreach ( silversea_get_cities_for_mode('pickup') as $city ) : ?>
-              <option value="<?php echo esc_attr($city['key']); ?>"><?php echo esc_html($city['name'] . ' — ' . $city['depot']); ?></option>
+              <option value="<?php echo esc_attr($city['key']); ?>"><?php echo esc_html(silversea_city_dropdown_label($city)); ?></option>
             <?php endforeach; ?>
           </select>
           <div id="scDepositoInfo" class="sc-deposito-info sc-hidden"></div>
@@ -794,7 +890,7 @@ function silversea_shipping_shortcode( $atts = [] ) {
           <select class="sc-select" id="scOriginCity" onchange="scSuggestTransport()">
             <option value=""><?php echo esc_html(silversea_text('origin_select_default')); ?></option>
             <?php foreach ( silversea_get_cities_for_mode('delivery') as $city ) : ?>
-              <option value="<?php echo esc_attr($city['key']); ?>"><?php echo esc_html($city['name'] . ' — ' . $city['depot']); ?></option>
+              <option value="<?php echo esc_attr($city['key']); ?>"><?php echo esc_html(silversea_city_dropdown_label($city)); ?></option>
             <?php endforeach; ?>
           </select>
           <div id="scDepositoInfoDelivery" class="sc-deposito-info sc-hidden"></div>
@@ -872,7 +968,7 @@ function silversea_shipping_ajax_calc() {
 
     global $wpdb; $table=$wpdb->prefix.'silversea_tarifas';
     $row=silversea_find_tarifa_row($origin,$cp);
-    if (!$row) wp_send_json_error(['message'=>sprintf( silversea_text('msg_no_tarifa'), $cp, silversea_origin_label($origin) )]);
+    if (!$row) wp_send_json_success(['no_tarifa'=>true,'cp'=>$cp,'origin'=>$origin,'product_size'=>$product_size,'quantity'=>$quantity]);
 
     $units_per=$product_size===10?1:($product_size===20?2:4);
     $trucks=(int)ceil(($units_per*$quantity)/4);
@@ -969,7 +1065,12 @@ function silversea_shipping_ajax_calc_consolidated() {
     if (empty($raq_content)) wp_send_json_error(['message'=>'No hay productos en la selección.']);
 
     $result=silversea_calc_consolidated_shipping($raq_content,$origin,$cp,$transp);
-    if (is_wp_error($result)) wp_send_json_error(['message'=>$result->get_error_message()]);
+    if (is_wp_error($result)) {
+        /* CP no disponible → flujo alternativo en vez de bloquear */
+        if ($result->get_error_code()==='no_tarifa')
+            wp_send_json_success(['no_tarifa'=>true,'cp'=>$cp,'origin'=>$origin,'product_size'=>'consolidated','quantity'=>count($raq_content)]);
+        wp_send_json_error(['message'=>$result->get_error_message()]);
+    }
 
     wp_send_json_success(['price'=>$result['total'],
         'detail'=>'Selección completa · '.$result['transp_label'].' · '.$result['destino'].' · desde '.silversea_origin_label($result['origin']).' · '.$result['trucks'].' camión'.($result['trucks']>1?'es':''),

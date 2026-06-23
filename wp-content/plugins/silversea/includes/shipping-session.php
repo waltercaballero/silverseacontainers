@@ -319,9 +319,10 @@ function silversea_load_quote_data( $quote_id ) {
         $_product = silversea_resolve_quote_product( $item );
         if ( $_product ) {
             $raq_content[] = [
-                'product_id'       => $_product->get_id(),
-                'quantity'         => $item['qty'],
-                'silversea_addons' => $item['addons'] ?? [],
+                'product_id'            => $_product->get_id(),
+                'quantity'              => $item['qty'],
+                'silversea_addons'      => $item['addons']       ?? [],
+                'silversea_addon_prices'=> $item['addon_prices'] ?? [],
             ];
         }
     }
@@ -504,7 +505,12 @@ function silversea_quote_metabox( $post ) {
             echo '<tr style="border-top:1px solid #e5e7eb;">';
             echo '<td style="padding:8px;">' . esc_html($item['name']) . '<br><small style="color:#6b7280">' . esc_html($item['condition'] ?? '') . '</small></td>';
             echo '<td style="padding:8px;text-align:center;">' . (int)$item['qty'] . '</td>';
-            echo '<td style="padding:8px;">' . esc_html(implode(', ', $item['addons'] ?? [])) . '</td>';
+            $addon_prices_map = $item['addon_prices'] ?? [];
+            $addons_str = implode(', ', array_map( function($a) use ($addon_prices_map) {
+                $p = isset($addon_prices_map[$a]) ? ' (' . number_format((float)$addon_prices_map[$a], 2, ',', '.') . ' €)' : '';
+                return $a . $p;
+            }, $item['addons'] ?? [] ));
+            echo '<td style="padding:8px;">' . esc_html($addons_str) . '</td>';
             echo '</tr>';
         }
         echo '</table>';
@@ -685,14 +691,15 @@ function silversea_process_and_save( $args ) {
         if ( $unit_price === null ) $unit_price = (float) $_product->get_price();
 
         $products[] = [
-            'name'       => $_product->get_title(),
-            'product_id' => (int) $pid,
-            'condition'  => ! empty($terms) ? $terms[0] : '',
-            'qty'        => (int) $raq['quantity'],
-            'addons'     => $raq['silversea_addons'] ?? [],
-            'color'      => $color,
-            'price'      => $unit_price,
-            'city'       => $price_city,
+            'name'         => $_product->get_title(),
+            'product_id'   => (int) $pid,
+            'condition'    => ! empty($terms) ? $terms[0] : '',
+            'qty'          => (int) $raq['quantity'],
+            'addons'       => $raq['silversea_addons']       ?? [],
+            'addon_prices' => $raq['silversea_addon_prices'] ?? [],
+            'color'        => $color,
+            'price'        => $unit_price,
+            'city'         => $price_city,
         ];
     }
 
@@ -747,7 +754,7 @@ function silversea_process_and_save( $args ) {
     }
 
     /* Enviar email al admin */
-    if ( $quote_id ) {
+    if ( $quote_id && ! is_wp_error( $quote_id ) ) {
         silversea_send_admin_email( $quote_id, [
             'name'        => $d['name'],
             'email'       => $d['email'],
@@ -807,7 +814,8 @@ function silversea_email_products_html_from_meta( $post_id, $show_prices, $city 
         $name      = $item['name']      ?? '';
         $condition = $item['condition'] ?? '';
         $qty       = (int)( $item['qty'] ?? 1 );
-        $addons    = $item['addons']    ?? [];
+        $addons       = $item['addons']       ?? [];
+        $addon_prices = $item['addon_prices'] ?? [];
 
         /* Buscar el producto en WC para obtener precio y descripción */
         $_product = silversea_resolve_quote_product( $item );
@@ -847,7 +855,11 @@ function silversea_email_products_html_from_meta( $post_id, $show_prices, $city 
             $html .= '<p style="margin:4px 0;font-size:13px;color:#374151;font-style:italic;">' . esc_html($desc) . '</p>';
 
         foreach ( $addons as $addon ) {
-            $html .= '<span class="ad" style="display:inline-block;margin:3px 4px 0 0;font-size:12px;color:#fff;background:#222E5C;padding:2px 8px;border-radius:4px;">+ ' . esc_html($addon) . '</span>';
+            $ap    = isset($addon_prices[$addon]) ? (float)$addon_prices[$addon] : 0.0;
+            $label = '+ ' . esc_html($addon);
+            if ( $show_prices && $ap > 0 )
+                $label .= ' — ' . number_format($ap, 2, ',', '.') . ' €';
+            $html .= '<span class="ad" style="display:inline-block;margin:3px 4px 0 0;font-size:12px;color:#fff;background:#222E5C;padding:2px 8px;border-radius:4px;">' . $label . '</span>';
         }
 
         $html .= '</div>';
@@ -894,7 +906,8 @@ function silversea_email_products_html( $raq_content, $show_prices, $city = '' )
         }
 
         /* Addons */
-        $addons = $raq['silversea_addons'] ?? [];
+        $addons       = $raq['silversea_addons']       ?? [];
+        $addon_prices = $raq['silversea_addon_prices'] ?? [];
 
         /* Precio unitario */
         $price_html = '';
@@ -917,7 +930,11 @@ function silversea_email_products_html( $raq_content, $show_prices, $city = '' )
             $html .= '<p class="pd" style="margin:4px 0;font-size:13px;color:#374151;font-style:italic;">' . esc_html($description) . '</p>';
 
         foreach ( $addons as $addon ) {
-            $html .= '<span class="ad" style="display:inline-block;margin:3px 4px 0 0;font-size:12px;color:#fff;background:#222E5C;padding:2px 8px;border-radius:4px;">+ ' . esc_html($addon) . '</span>';
+            $ap    = isset($addon_prices[$addon]) ? (float)$addon_prices[$addon] : 0.0;
+            $label = '+ ' . esc_html($addon);
+            if ( $show_prices && $ap > 0 )
+                $label .= ' — ' . number_format($ap, 2, ',', '.') . ' €';
+            $html .= '<span class="ad" style="display:inline-block;margin:3px 4px 0 0;font-size:12px;color:#fff;background:#222E5C;padding:2px 8px;border-radius:4px;">' . $label . '</span>';
         }
 
         $html .= '</div>';
@@ -977,6 +994,10 @@ function silversea_email_shipping_html( $data, $show_prices ) {
     } elseif ( $show_prices && isset($data['price']) && $data['price'] > 0 ) {
         $html .= '<p style="font-size:14px;font-weight:600;color:#0F2557;margin-top:8px;">€ '
                . number_format((float)$data['price'],2,',','.') . '</p>';
+    } elseif ( ! $con && ! ( isset($data['price']) && (float)$data['price'] > 0 ) ) {
+        /* CP sin tarifa — precio pendiente de confirmar */
+        $html .= '<p style="margin:10px 0 0;font-size:13px;font-weight:600;color:#d97706;">'
+               . '⚠ Precio de transporte a confirmar por asesor comercial</p>';
     }
 
     /* Plazo de entrega */
@@ -1006,9 +1027,14 @@ function silversea_email_total( $raq_content, $data ) {
         $pid      = ! empty($raq['variation_id']) ? $raq['variation_id'] : $raq['product_id'];
         $_product = wc_get_product( $pid );
         if ( ! $_product ) continue;
+        $qty   = (int)($raq['quantity'] ?? 1);
         $cp    = $city ? silversea_get_product_city_price( $pid, $city ) : null;
         $price = $cp !== null ? $cp : (float) $_product->get_price();
-        $total += $price * (int)($raq['quantity'] ?? 1);
+        $total += $price * $qty;
+        /* Sumar precios de addons (por unidad × cantidad) */
+        foreach ( (array)($raq['silversea_addon_prices'] ?? []) as $ap ) {
+            $total += (float)$ap * $qty;
+        }
     }
     $con = $data['consolidated'] ?? null;
     if ( $con ) $total += (float)($con['total'] ?? 0);
@@ -1265,8 +1291,17 @@ function silversea_intercept_wapo( $is_valid, $product_id ) {
     }
     if ( empty( $addons ) ) return $is_valid;
 
-    global $silversea_pending_addons;
-    $silversea_pending_addons[ (int) $product_id ] = $addons;
+    /* Capturar precios inyectados por el JS (silversea_addon_price[label] = precio) */
+    $addon_prices = [];
+    foreach ( (array)( $_POST['silversea_addon_price'] ?? [] ) as $label => $price ) {
+        $label = sanitize_text_field( $label );
+        $price = (float) $price;
+        if ( $label && $price > 0 ) $addon_prices[ $label ] = $price;
+    }
+
+    global $silversea_pending_addons, $silversea_pending_addon_prices;
+    $silversea_pending_addons[ (int) $product_id ]       = $addons;
+    $silversea_pending_addon_prices[ (int) $product_id ] = $addon_prices;
 
     return $is_valid;
 }
@@ -1274,7 +1309,7 @@ function silversea_intercept_wapo( $is_valid, $product_id ) {
 add_action( 'yith_raq_updated', 'silversea_inject_addons_to_raq' );
 
 function silversea_inject_addons_to_raq() {
-    global $silversea_pending_addons;
+    global $silversea_pending_addons, $silversea_pending_addon_prices;
     if ( empty( $silversea_pending_addons ) ) return;
     if ( ! function_exists( 'YITH_Request_Quote' ) ) return;
 
@@ -1292,8 +1327,9 @@ function silversea_inject_addons_to_raq() {
         if ( $lookup_key === null ) continue;
         if ( isset( $raq['silversea_addons'] ) ) continue;
 
-        $raq['silversea_addons'] = $silversea_pending_addons[ $lookup_key ];
-        unset( $silversea_pending_addons[ $lookup_key ] );
+        $raq['silversea_addons']       = $silversea_pending_addons[ $lookup_key ];
+        $raq['silversea_addon_prices'] = $silversea_pending_addon_prices[ $lookup_key ] ?? [];
+        unset( $silversea_pending_addons[ $lookup_key ], $silversea_pending_addon_prices[ $lookup_key ] );
         $modified = true;
     }
     unset( $raq );

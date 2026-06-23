@@ -135,7 +135,7 @@ add_action( 'admin_menu', function () {
     add_submenu_page(
         'silversea-cotizador',
         'Textos del cotizador',
-        '📝 Textos',
+        'Textos',
         'manage_woocommerce',
         'silversea-textos',
         'silversea_texts_render_page'

@@ -16,48 +16,64 @@ if ( ! defined( 'ABSPATH' ) ) exit;
 function silversea_default_cities() {
     return [
         [
-            'key'     => 'barcelona',
-            'name'    => 'Barcelona',
-            'depot'   => 'Almacenes de Depósito MARTEINER',
-            'address' => 'Ronda del port, 437, 08039 Barcelona',
-            'modes'   => ['delivery', 'pickup'],
+            'key'          => 'barcelona',
+            'name'         => 'Barcelona',
+            'display_name' => '',
+            'depot'        => 'Almacenes de Depósito MARTEINER',
+            'address'      => 'Ronda del port, 437, 08039 Barcelona',
+            'modes'        => ['delivery', 'pickup'],
         ],
         [
-            'key'     => 'madrid',
-            'name'    => 'Madrid',
-            'depot'   => 'MAARIF S.L.',
-            'address' => 'Humanes de Madrid, Camino de la Fraila esq. calle Salamanca (acceso desde M-413)',
-            'modes'   => ['delivery', 'pickup'],
+            'key'          => 'madrid',
+            'name'         => 'Madrid',
+            'display_name' => '',
+            'depot'        => 'MAARIF S.L.',
+            'address'      => 'Humanes de Madrid, Camino de la Fraila esq. calle Salamanca (acceso desde M-413)',
+            'modes'        => ['delivery', 'pickup'],
         ],
         [
-            'key'     => 'madrid2',
-            'name'    => 'Madrid 2',
-            'depot'   => 'SILVERMODULAR',
-            'address' => 'C. de Tamajón, 53, 19210 Yunquera de Henares, Guadalajara',
-            'modes'   => ['delivery', 'pickup'],
+            'key'          => 'madrid2',
+            'name'         => 'Madrid 2',
+            'display_name' => '',
+            'depot'        => 'SILVERMODULAR',
+            'address'      => 'C. de Tamajón, 53, 19210 Yunquera de Henares, Guadalajara',
+            'modes'        => ['delivery', 'pickup'],
         ],
         [
-            'key'     => 'valencia',
-            'name'    => 'Valencia',
-            'depot'   => 'Trans Base Soler',
-            'address' => 'Puerto de Valencia, Ampliación Norte S/N, 46024 Valencia',
-            'modes'   => ['delivery', 'pickup'],
+            'key'          => 'valencia',
+            'name'         => 'Valencia',
+            'display_name' => '',
+            'depot'        => 'Trans Base Soler',
+            'address'      => 'Puerto de Valencia, Ampliación Norte S/N, 46024 Valencia',
+            'modes'        => ['delivery', 'pickup'],
         ],
         [
-            'key'     => 'bilbao',
-            'name'    => 'Bilbao',
-            'depot'   => 'Depot CARGOR',
-            'address' => 'PORT OF BILBAO. ZAL ZONE. MUELLE AZ 3 TRASERA, 48508 ZIBERBENA',
-            'modes'   => ['pickup'],
+            'key'          => 'bilbao',
+            'name'         => 'Bilbao',
+            'display_name' => '',
+            'depot'        => 'Depot CARGOR',
+            'address'      => 'PORT OF BILBAO. ZAL ZONE. MUELLE AZ 3 TRASERA, 48508 ZIBERBENA',
+            'modes'        => ['pickup'],
         ],
         [
-            'key'     => 'algeciras',
-            'name'    => 'Algeciras',
-            'depot'   => 'Depot DOCKS ALGECIRAS',
-            'address' => 'Polígono Industrial ZAL, Área del Fresno s/n, Estación Férrea s/n, Los Barrios 11370 Cádiz',
-            'modes'   => ['pickup'],
+            'key'          => 'algeciras',
+            'name'         => 'Algeciras',
+            'display_name' => '',
+            'depot'        => 'Depot DOCKS ALGECIRAS',
+            'address'      => 'Polígono Industrial ZAL, Área del Fresno s/n, Estación Férrea s/n, Los Barrios 11370 Cádiz',
+            'modes'        => ['pickup'],
         ],
     ];
+}
+
+/**
+ * Texto que se muestra en los desplegables del frontend para una ciudad.
+ * Si display_name está configurado, lo usa; si no, usa nombre + depósito.
+ */
+function silversea_city_dropdown_label( $city ) {
+    return ! empty( $city['display_name'] )
+        ? $city['display_name']
+        : $city['name'] . ' — ' . $city['depot'];
 }
 
 /** Devuelve el array completo de ciudades (desde opción o defaults). */
