@@ -401,6 +401,10 @@ function silversea_calc_consolidated_shipping( $raq_content, $origin, $cp, $tran
     $p_c40         = (float) $row['precio_con_desc_40'];
     $p_extra_truck = (float) get_option( 'silversea_extra_truck_cost', '1350.00' );
 
+    /* CP tiene tarifa sin descarga pero no tiene con descarga → precio a confirmar */
+    if ( $transport === 'con' && $p_c20 == 0.0 && $p_c40 == 0.0 && $p_sin > 0 )
+        return new WP_Error( 'price_pending', 'Con descarga no disponible para CP ' . $cp . '.' );
+
     $parsed     = silversea_raq_to_items_detail( $raq_content );
     $items_detail = $parsed['items'];
     $total_units  = $parsed['total_units'];

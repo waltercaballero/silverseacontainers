@@ -1,6 +1,6 @@
 <?php
 /*
-Plugin Name: Silversea Containers
+Plugin Name: SILVERSEA Containers
 Description: Personalizaciones y funcionalidades espec&iacute;ficas del sitio.
 Author: Walter D. Caballero
 Version: 1.0
@@ -101,7 +101,7 @@ function lcs_show_flag() {
         //$flag_url = plugin_dir_url(__FILE__) . 'flags/' . $country . '.png';
 
 		if ( $flag_url = get_option('lcs_flag_' . $country) ) {
-			$html = '<img src="' . esc_url($flag_url) . '" alt="Silversea Containers ' . strtoupper( $country ) . '" class="open-store-popup" id="open-store-popup">';
+			$html = '<img src="' . esc_url($flag_url) . '" alt="SILVERSEA Containers ' . strtoupper( $country ) . '" class="open-store-popup" id="open-store-popup">';
 		}
     }
 
@@ -711,7 +711,7 @@ add_filter('walker_nav_menu_start_el', 'replace_dynamic_menu_links_manual', 10, 
 
 
 
-/* SOLO FUNCIONA CON ELEMENTOR PRO --- SE CAMBI� AL M�TODO POR JAVASCRIPT */
+/* SOLO FUNCIONA CON ELEMENTOR PRO --- SE CAMBIÓ AL MÉTODO POR JAVASCRIPT */
 add_action( 'elementor_pro/forms/new_record', function( $record, $handler ) {
     $form_name = $record->get_form_settings( 'form_name' );
 
@@ -752,7 +752,7 @@ add_action( 'elementor_pro/forms/new_record', function( $record, $handler ) {
 
 
 		$to = 'waltercaballero@gmail.com';
-		$subject = 'Nuevo formulario enviado desde Silversea Containers';
+		$subject = 'Nuevo formulario enviado desde SILVERSEA Containers';
 		$message = "Se ha enviado un nuevo formulario con los siguientes datos:\n\n";
 
 		foreach ($salesforce_data as $key => $value) {
@@ -815,7 +815,7 @@ function lcs_sf_form_send_email(WP_REST_Request $request) {
     $data = $request->get_json_params();
 
     $to = 'waltercaballero@gmail.com';
-    $subject = 'Nuevo formulario enviado desde Silversea Containers';
+    $subject = 'Nuevo formulario enviado desde SILVERSEA Containers';
     $message = "Se ha enviado un nuevo formulario con los siguientes datos:\n\n";
 
     foreach ($data as $key => $value) {

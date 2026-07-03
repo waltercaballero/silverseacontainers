@@ -548,6 +548,20 @@
   line-height: 1.3;
 }
 
+/* ── Precio del contenedor por ciudad (toggle admin) ── */
+.silversea-product-price-display {
+  font-size: 2em;
+  font-weight: 700;
+  line-height: 1.2;
+  margin-bottom: 0.75em;
+}
+.silversea-price-unavailable {
+  font-size: 0.7em;
+  font-weight: 500;
+  color: #9ca3af;
+  font-style: italic;
+}
+
 /* ── ocultar campo qty nativo de WooCommerce (solo se carga cuando hay cotizador) ── */
 form.cart .quantity,
 form.cart .qty-label { display: none !important; }

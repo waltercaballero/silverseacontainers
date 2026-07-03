@@ -34,10 +34,12 @@ function silversea_ajax_save_shipping() {
                          ? sanitize_key($_POST['transport']) : 'sin',
         'pickup_city' => in_array( sanitize_key($_POST['pickup_city'] ?? ''), $allowed_origins, true )
                          ? sanitize_key($_POST['pickup_city']) : '',
-        'price'       => round( (float)($_POST['price'] ?? 0), 2 ),
-        'detail'      => sanitize_text_field( $_POST['detail'] ?? '' ),
-        'trucks'      => (int)($_POST['trucks'] ?? 1),
-        'days'        => (int)($_POST['days']   ?? 5),
+        'price'         => round( (float)($_POST['price'] ?? 0), 2 ),
+        'detail'        => sanitize_text_field( $_POST['detail'] ?? '' ),
+        'trucks'        => (int)($_POST['trucks'] ?? 1),
+        'days'          => (int)($_POST['days']   ?? 5),
+        'price_pending' => ! empty($_POST['price_pending']),
+        'no_tarifa'     => ! empty($_POST['no_tarifa']),
     ];
 
     WC()->session->set( 'silversea_shipping_data', $data );
@@ -282,7 +284,7 @@ function silversea_handle_resend_single() {
     } else {
         $body    = get_post_meta($quote_id, '_sq_email_body_client', true);
         $to      = $debug_mode ? $email_debug : $client_email;
-        $subject = sprintf('[Silversea Containers] Su solicitud de cotización #%d', $quote_id);
+        $subject = sprintf('[SILVERSEA Containers] Su solicitud de cotización #%d', $quote_id);
         if ( ! $to ) wp_die('El cliente no tiene email registrado.');
     }
 
@@ -827,7 +829,9 @@ function silversea_email_products_html_from_meta( $post_id, $show_prices, $city 
         if ( $_product ) {
             $city_p    = $city ? silversea_get_product_city_price( $_product->get_id(), $city ) : null;
             $price     = $city_p !== null ? $city_p : (float) $_product->get_price();
-            $desc     = wp_trim_words( wp_strip_all_tags( get_post_field('post_content', $_product->get_id()) ), 40, '…' );
+            /* Descripción: siempre desde el producto padre (las variaciones tienen post_content vacío) */
+            $desc_id   = $_product->is_type('variation') ? $_product->get_parent_id() : $_product->get_id();
+            $desc      = wp_trim_words( wp_strip_all_tags( get_post_field('post_content', $desc_id) ), 40, '…' );
             $t_terms  = wc_get_product_terms( $_product->get_id(), 'pa_tamano',    ['fields' => 'names'] );
             $c_terms  = wc_get_product_terms( $_product->get_id(), 'pa_condicion', ['fields' => 'names'] );
             $tamano   = ! empty($t_terms) ? $t_terms[0] : '';
@@ -849,8 +853,13 @@ function silversea_email_products_html_from_meta( $post_id, $show_prices, $city 
         if ( $condicion )
             $html .= '<p style="margin:2px 0;font-size:13px;color:#6b7280;">' . esc_html($condicion) . '</p>';
         $color = $item['color'] ?? '';
-        if ( $color )
+        $is_usado = ( strtolower( $condicion ) === 'usado' );
+        if ( $is_usado ) {
+            /* Usados: siempre mostrar "Color según disponibilidad", tengan o no color asignado */
+            $html .= '<p style="margin:2px 0;font-size:13px;color:#6b7280;">Color según disponibilidad</p>';
+        } elseif ( $color ) {
             $html .= '<p style="margin:2px 0;font-size:13px;color:#6b7280;">' . esc_html($color) . '</p>';
+        }
         if ( $desc )
             $html .= '<p style="margin:4px 0;font-size:13px;color:#374151;font-style:italic;">' . esc_html($desc) . '</p>';
 
@@ -858,7 +867,7 @@ function silversea_email_products_html_from_meta( $post_id, $show_prices, $city 
             $ap    = isset($addon_prices[$addon]) ? (float)$addon_prices[$addon] : 0.0;
             $label = '+ ' . esc_html($addon);
             if ( $show_prices && $ap > 0 )
-                $label .= ' — ' . number_format($ap, 2, ',', '.') . ' €';
+                $label .= ' — Desde ' . number_format($ap, 2, ',', '.') . ' €';
             $html .= '<span class="ad" style="display:inline-block;margin:3px 4px 0 0;font-size:12px;color:#fff;background:#222E5C;padding:2px 8px;border-radius:4px;">' . $label . '</span>';
         }
 
@@ -879,9 +888,9 @@ function silversea_email_products_html( $raq_content, $show_prices, $city = '' )
         $city_price  = $city ? silversea_get_product_city_price( $pid, $city ) : null;
         $price       = $city_price !== null ? $city_price : (float) $_product->get_price();
 
-        /* Descripción del producto desde post_content */
-        $description = wp_strip_all_tags( get_post_field('post_content', $_product->get_id()) );
-        $description = wp_trim_words( $description, 40, '…' );
+        /* Descripción: siempre desde el producto padre (variaciones tienen post_content vacío) */
+        $desc_id     = $_product->is_type('variation') ? $_product->get_parent_id() : $_product->get_id();
+        $description = wp_trim_words( wp_strip_all_tags( get_post_field('post_content', $desc_id) ), 40, '…' );
 
         /* Atributos */
         $tamano_terms   = wc_get_product_terms( $_product->get_id(), 'pa_tamano',   ['fields' => 'names'] );
@@ -924,8 +933,13 @@ function silversea_email_products_html( $raq_content, $show_prices, $city = '' )
             $html .= '<p class="pm" style="margin:2px 0;font-size:13px;color:#6b7280;">' . esc_html($tamano) . '</p>';
         if ( $condicion )
             $html .= '<p class="pm" style="margin:2px 0;font-size:13px;color:#6b7280;">' . esc_html($condicion) . '</p>';
-        if ( $color_attr )
+        $is_usado = ( strtolower( $condicion ) === 'usado' );
+        if ( $is_usado ) {
+            /* Usados: siempre mostrar "Color según disponibilidad", tengan o no color asignado */
+            $html .= '<p class="pm" style="margin:2px 0;font-size:13px;color:#6b7280;">Color según disponibilidad</p>';
+        } elseif ( $color_attr ) {
             $html .= '<p class="pm" style="margin:2px 0;font-size:13px;color:#6b7280;">' . esc_html($color_attr) . '</p>';
+        }
         if ( $description )
             $html .= '<p class="pd" style="margin:4px 0;font-size:13px;color:#374151;font-style:italic;">' . esc_html($description) . '</p>';
 
@@ -933,7 +947,7 @@ function silversea_email_products_html( $raq_content, $show_prices, $city = '' )
             $ap    = isset($addon_prices[$addon]) ? (float)$addon_prices[$addon] : 0.0;
             $label = '+ ' . esc_html($addon);
             if ( $show_prices && $ap > 0 )
-                $label .= ' — ' . number_format($ap, 2, ',', '.') . ' €';
+                $label .= ' — Desde ' . number_format($ap, 2, ',', '.') . ' €';
             $html .= '<span class="ad" style="display:inline-block;margin:3px 4px 0 0;font-size:12px;color:#fff;background:#222E5C;padding:2px 8px;border-radius:4px;">' . $label . '</span>';
         }
 
@@ -994,8 +1008,12 @@ function silversea_email_shipping_html( $data, $show_prices ) {
     } elseif ( $show_prices && isset($data['price']) && $data['price'] > 0 ) {
         $html .= '<p style="font-size:14px;font-weight:600;color:#0F2557;margin-top:8px;">€ '
                . number_format((float)$data['price'],2,',','.') . '</p>';
+    } elseif ( ! empty($data['price_pending']) ) {
+        /* CP tiene tarifa sin descarga pero no tiene con descarga */
+        $html .= '<p style="margin:10px 0 0;font-size:13px;font-weight:600;color:#d97706;">'
+               . '⚠ El precio de transporte con descarga para este código postal será confirmado por nuestro asesor comercial al contactarse con usted.</p>';
     } elseif ( ! $con && ! ( isset($data['price']) && (float)$data['price'] > 0 ) ) {
-        /* CP sin tarifa — precio pendiente de confirmar */
+        /* CP no está en nuestra base de datos */
         $html .= '<p style="margin:10px 0 0;font-size:13px;font-weight:600;color:#d97706;">'
                . '⚠ Precio de transporte a confirmar por asesor comercial</p>';
     }
@@ -1166,7 +1184,7 @@ function silversea_send_admin_email( $quote_id, $data ) {
     $email_debug     = get_option('silversea_admin_email', get_option('admin_email'));
 
     $subject_sales  = sprintf('[Silversea Ventas] Nueva cotización #%d – %s', $quote_id, $data['name']);
-    $subject_client = sprintf('[Silversea Containers] Su solicitud de cotización #%d', $quote_id);
+    $subject_client = sprintf('[SILVERSEA Containers] Su solicitud de cotización #%d', $quote_id);
 
     $headers_base = [
         'Content-Type: text/html; charset=UTF-8',

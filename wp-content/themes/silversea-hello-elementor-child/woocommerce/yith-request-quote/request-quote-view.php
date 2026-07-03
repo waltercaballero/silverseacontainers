@@ -53,7 +53,10 @@ if ( count( $raq_content ) === 0 ) : ?>
                         $item_data[] = ['key'=>$label,'value'=>$value];
                     }
                 }
-                $item_data = apply_filters('ywraq_request_quote_view_item_data', $item_data, $raq, $_product);
+                /* No aplicar el filtro de YITH para evitar que WAPO inyecte
+                   nombre + precio de cada addon en esta lista (los addons
+                   se muestran sin precio más abajo, en silversea-raq-addons). */
+                // $item_data = apply_filters('ywraq_request_quote_view_item_data', $item_data, $raq, $_product);
             ?>
             <div class="silversea-raq-row">
 

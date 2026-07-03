@@ -16,7 +16,7 @@ if ( ! defined( 'SILVERSEA_PLUGIN_DIR' ) )
 /* Versión única para cache-busting de todos los assets (JS/CSS).
    Subir este número cuando se modifique cualquier archivo de assets. */
 if ( ! defined( 'SILVERSEA_VERSION' ) )
-    define( 'SILVERSEA_VERSION', '2.3.0' );
+    define( 'SILVERSEA_VERSION', '2.3.1' );
 
 require_once __DIR__ . '/texts.php';
 
@@ -71,6 +71,7 @@ add_action( 'admin_init', function () {
         'silversea_show_consolidated',
         'silversea_catalog_price_mode',
         'silversea_catalog_price_default_city',
+        'silversea_show_product_price',
     ] as $key ) register_setting( 'silversea_settings', $key );
 } );
 
@@ -303,6 +304,17 @@ function silversea_shipping_admin_page() {
             Mostrar el precio calculado al cliente en la página del producto
           </label>
           <p class="description">Desactivado por defecto. Cuando está desactivado el cálculo se realiza internamente pero el resultado no se muestra — solo se envía por email.</p>
+        </td>
+      </tr>
+      <tr>
+        <th style="padding:12px 0;">Precio del contenedor</th>
+        <td>
+          <label style="display:flex;align-items:center;gap:8px;">
+            <input type="checkbox" name="silversea_show_product_price" value="1"
+                   <?php checked('1', get_option('silversea_show_product_price','0')); ?>>
+            Mostrar el precio del contenedor en la página de producto
+          </label>
+          <p class="description">Muestra el precio según la ciudad/depósito seleccionado. Si no hay precio configurado para esa ciudad, muestra "No disponible". Útil cuando YITH oculta el precio por defecto.</p>
         </td>
       </tr>
       <tr>
@@ -796,8 +808,9 @@ function silversea_shipping_shortcode( $atts = [] ) {
         'demoPriceC20' => (float)get_option('silversea_demo_price_c20', '1644.00'),
         'demoPriceC40'    => (float)get_option('silversea_demo_price_c40', '1765.28'),
         'extraTruckCost'  => (float)get_option('silversea_extra_truck_cost', '1350.00'),
-        'showFront'       => get_option('silversea_show_front', '0'),
-        'requireQuote'    => get_option('silversea_require_quote', '0'),
+        'showFront'        => get_option('silversea_show_front', '0'),
+        'requireQuote'     => get_option('silversea_require_quote', '0'),
+        'showProductPrice' => get_option('silversea_show_product_price', '0'),
         'productColor'    => $color_info,
         'extras'          => $extras_data,
         'cities'           => silversea_get_cities(),
@@ -974,6 +987,14 @@ function silversea_shipping_ajax_calc() {
     $trucks=(int)ceil(($units_per*$quantity)/4);
     $descarga_modo=get_option('silversea_descarga_modo','contenedor');
     $p_sin=(float)$row['precio_sin_descarga']; $p_c20=(float)$row['precio_con_desc_20']; $p_c40=(float)$row['precio_con_desc_40'];
+
+    /* CP tiene tarifa sin descarga pero no tiene tarifa con descarga → precio a confirmar */
+    if ($transp==='con' && $p_c20==0.0 && $p_c40==0.0 && $p_sin>0) {
+        $destino=$row['municipio_destino']?:"CP {$cp}";
+        wp_send_json_success(['price_pending'=>true,'cp'=>$cp,'origin'=>$origin,'product_size'=>$product_size,'quantity'=>$quantity,
+            'detail'=>"{$quantity}×{$product_size}' · con descarga · {$destino} · desde ".silversea_origin_label($origin)]);
+    }
+
     $breakdown=[]; $total=0.0;
 
     if ($transp==='sin'||$descarga_modo==='camion') {
@@ -1066,9 +1087,12 @@ function silversea_shipping_ajax_calc_consolidated() {
 
     $result=silversea_calc_consolidated_shipping($raq_content,$origin,$cp,$transp);
     if (is_wp_error($result)) {
-        /* CP no disponible → flujo alternativo en vez de bloquear */
-        if ($result->get_error_code()==='no_tarifa')
+        $code=$result->get_error_code();
+        if ($code==='no_tarifa')
             wp_send_json_success(['no_tarifa'=>true,'cp'=>$cp,'origin'=>$origin,'product_size'=>'consolidated','quantity'=>count($raq_content)]);
+        if ($code==='price_pending')
+            wp_send_json_success(['price_pending'=>true,'cp'=>$cp,'origin'=>$origin,'product_size'=>'consolidated','quantity'=>count($raq_content),
+                'detail'=>'Selección completa · con descarga · CP '.$cp.' · desde '.silversea_origin_label($origin)]);
         wp_send_json_error(['message'=>$result->get_error_message()]);
     }
 
@@ -1159,6 +1183,21 @@ function silversea_catalog_price_html( $price_html, $product ) {
 }
 
 /* ══════════════════════════════════════════════════════════════
+   PRECIO DEL CONTENEDOR EN PRODUCTO — elemento inyectado
+   Se muestra/oculta según el toggle del admin.
+   El JS (scUpdateProductPrice) actualiza su contenido al elegir ciudad.
+══════════════════════════════════════════════════════════════ */
+
+add_action( 'woocommerce_single_product_summary', 'silversea_inject_product_price_el', 11 );
+
+function silversea_inject_product_price_el() {
+    if ( get_option( 'silversea_show_product_price', '0' ) !== '1' ) return;
+    if ( ! is_product() ) return;
+    /* Clase "price" para heredar estilos del tema; oculto hasta que JS lo pueble */
+    echo '<div id="silversea-product-price" class="price silversea-product-price-display" style="display:none;"></div>';
+}
+
+/* ══════════════════════════════════════════════════════════════
    AJAX — guardar precios por ciudad
 ══════════════════════════════════════════════════════════════ */
 
@@ -1192,6 +1231,55 @@ add_action( 'wp_ajax_silversea_save_city_prices', function() {
 } );
 
 /* ══════════════════════════════════════════════════════════════
+   HELPER — Badge de estado (publicación + stock) para tablas admin
+══════════════════════════════════════════════════════════════ */
+
+function silversea_estado_cell( WC_Product $product, int $post_id ): string {
+    /* ── Publicación ── */
+    $status = get_post_status( $post_id );
+    $pub_map = [
+        'publish' => ['Publicado', '#059669', '#d1fae5'],
+        'draft'   => ['Borrador',  '#d97706', '#fef3c7'],
+        'private' => ['Privado',   '#6b7280', '#f3f4f6'],
+        'pending' => ['Revisión',  '#6b7280', '#f3f4f6'],
+    ];
+    [$plabel, $pcolor, $pbg] = $pub_map[$status] ?? ['—', '#9ca3af', '#f9fafb'];
+
+    /* ── Stock ── */
+    if ( $product->is_type('variable') ) {
+        $in_stock = $product->is_in_stock();
+        $qty      = null;
+        /* sumar stock de variaciones con manage_stock */
+        $total_qty = 0; $any_managed = false;
+        foreach ( $product->get_children() as $vid ) {
+            $v = wc_get_product($vid);
+            if ( ! $v ) continue;
+            if ( $v->get_manage_stock() ) { $any_managed = true; $total_qty += (int)$v->get_stock_quantity(); }
+        }
+        if ( $any_managed ) $qty = $total_qty;
+    } else {
+        $in_stock = $product->is_in_stock();
+        $qty      = $product->get_manage_stock() ? $product->get_stock_quantity() : null;
+    }
+
+    if ( $qty !== null ) {
+        $slabel = $qty . ' uds.';
+        $scolor = $qty > 0 ? '#059669' : '#dc2626';
+        $sbg    = $qty > 0 ? '#d1fae5'  : '#fee2e2';
+    } else {
+        $slabel = $in_stock ? 'En stock' : 'Sin stock';
+        $scolor = $in_stock ? '#059669'  : '#dc2626';
+        $sbg    = $in_stock ? '#d1fae5'  : '#fee2e2';
+    }
+
+    $badge = '<span style="display:inline-block;font-size:11px;font-weight:600;background:%s;color:%s;padding:1px 7px;border-radius:4px;white-space:nowrap;">%s</span>';
+    return '<div style="display:flex;flex-direction:column;gap:3px;">'
+         . sprintf($badge, $pbg, $pcolor, esc_html($plabel))
+         . sprintf($badge, $sbg, $scolor, esc_html($slabel))
+         . '</div>';
+}
+
+/* ══════════════════════════════════════════════════════════════
    PÁGINA — Precios por Ciudad (mapeo en lote)
 ══════════════════════════════════════════════════════════════ */
 
@@ -1201,7 +1289,7 @@ function silversea_render_city_prices_page() {
 
     $args = [
         'post_type'      => 'product',
-        'post_status'    => 'publish',
+        'post_status'    => ['publish', 'draft', 'private', 'pending'],
         'posts_per_page' => -1,
         'orderby'        => ['menu_order' => 'ASC', 'title' => 'ASC'],
     ];
@@ -1212,7 +1300,7 @@ function silversea_render_city_prices_page() {
     $categories = get_terms( ['taxonomy' => 'product_cat', 'hide_empty' => true, 'orderby' => 'name'] );
     $cities     = silversea_get_cities();
     ?>
-    <div class="wrap" style="max-width:1100px;">
+    <div class="wrap">
       <h1>🏙 Precios por Ciudad</h1>
       <p style="color:#6b7280;font-size:13px;margin-top:4px;">
         Precio del contenedor según la ciudad de retiro o salida elegida por el cliente.
@@ -1249,14 +1337,15 @@ function silversea_render_city_prices_page() {
       <?php if ( empty($products) ) : ?>
         <p style="color:#9ca3af;text-align:center;padding:48px;">No se encontraron productos.</p>
       <?php else : ?>
-      <table class="wp-list-table widefat fixed" id="scp-table">
+      <table class="wp-list-table widefat" id="scp-table" style="table-layout:auto;">
         <thead>
           <tr>
             <th style="width:44px;"></th>
-            <th>Producto</th>
-            <th style="width:110px;">SKU</th>
+            <th style="min-width:180px;">Producto</th>
+            <th style="width:80px;white-space:nowrap;">SKU</th>
+            <th style="width:110px;white-space:nowrap;">Estado</th>
             <?php foreach ( $cities as $city ) : ?>
-              <th style="width:110px;text-align:center;"><?php echo esc_html($city['name']); ?></th>
+              <th style="width:110px;min-width:100px;text-align:center;white-space:nowrap;"><?php echo esc_html($city['name']); ?></th>
             <?php endforeach; ?>
           </tr>
         </thead>
@@ -1281,6 +1370,7 @@ function silversea_render_city_prices_page() {
             <?php endif; ?>
           </td>
           <td><code style="font-size:11px;background:#f3f4f6;padding:2px 6px;border-radius:3px;"><?php echo esc_html($sku); ?></code></td>
+          <td><?php echo silversea_estado_cell($product, $post->ID); ?></td>
           <?php foreach ( $cities as $city ) : ?>
             <td style="text-align:center;">
               <input type="number" class="scp-input" step="0.01" min="0"
@@ -1298,7 +1388,10 @@ function silversea_render_city_prices_page() {
     </div>
 
     <style>
-    #scp-table th, #scp-table td { vertical-align:middle; }
+    #scp-table { width:100%; }
+    #scp-table th, #scp-table td { vertical-align:middle; white-space:nowrap; }
+    #scp-table th:nth-child(2), #scp-table td:nth-child(2) { white-space:normal; min-width:160px; }
+    .scp-input { width:90px; height:28px; padding:0 6px; font-size:13px; border:1px solid #d1d5db; border-radius:4px; text-align:right; }
     .scp-input:focus { border-color:#2271b1!important; box-shadow:0 0 0 1px #2271b1; outline:none; }
     .scp-input.scp-dirty { border-color:#f59e0b!important; background:#fffbeb; }
     </style>

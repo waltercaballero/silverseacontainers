@@ -1,4 +1,4 @@
-/* shipping-calculator.js  v1.4.0 */
+﻿﻿﻿﻿/* shipping-calculator.js  v1.4.0 */
 
 /* Textos editables desde el admin (Cotizador → 📝 Textos).
    Lee silvSea.texts[key]; si no existe usa el fallback (texto por defecto). */
@@ -65,6 +65,7 @@ function scT(key, fallback) {
     if (p.origin) {
       var originEl = document.getElementById('scOriginCity');
       if (originEl) { originEl.value = p.origin; scShowDeposito(p.origin, 'scDepositoInfoDelivery'); }
+      if (window.scUpdateProductPrice) window.scUpdateProductPrice(p.origin);
     }
     /* postal */
     if (p.postal) {
@@ -223,7 +224,17 @@ function scT(key, fallback) {
       detailEl.textContent = data.detail || "";
       if (data.breakdown && data.breakdown.length > 0) {
         var lines = data.breakdown.map(function (b) { return b.label + ": € " + parseFloat(b.price).toLocaleString("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 2 }); });
-        breakEl.innerHTML = "<strong>Desglose:</strong><br>" + lines.join("<br>");
+        /* Leyenda de extras seleccionados (informativa, no suma al total) */
+        var extrasHtml = '';
+        if (window.scSelectedExtras && typeof silvSea !== 'undefined' && Array.isArray(silvSea.extras)) {
+          var sel = silvSea.extras.filter(function(e) { return window.scSelectedExtras[e.value]; });
+          if (sel.length) {
+            extrasHtml = '<br><strong>Extras:</strong><br>' + sel.map(function(e) {
+              return e.label + (e.price > 0 ? ' — Desde ' + parseFloat(e.price).toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' €' : '');
+            }).join('<br>');
+          }
+        }
+        breakEl.innerHTML = "<strong>Desglose:</strong><br>" + lines.join("<br>") + extrasHtml;
         breakEl.classList.remove("sc-hidden");
       } else breakEl.classList.add("sc-hidden");
       if (data.days) {
@@ -428,6 +439,8 @@ function scT(key, fallback) {
         if (data && data.success) {
           if (data.data && data.data.no_tarifa) {
             scShowNoTarifaFlow(data.data);
+          } else if (data.data && data.data.price_pending) {
+            scShowPricePendingFlow(data.data);
           } else {
             scShowResult(data.data);
           }
@@ -483,6 +496,43 @@ function scT(key, fallback) {
     setTimeout(function() { area.scrollIntoView({ behavior: "smooth", block: "nearest" }); }, 50);
   }
 
+
+  function scShowPricePendingFlow(data) {
+    document.getElementById("scLoaderArea").classList.add("sc-hidden");
+    document.getElementById("scErrorArea").classList.add("sc-hidden");
+    document.getElementById("scCalcBtn").disabled = false;
+
+    var area    = document.getElementById("scResultArea");
+    var priceEl = document.getElementById("scResultPrice");
+    var detailEl= document.getElementById("scResultDetail");
+    var breakEl = document.getElementById("scResultBreakdown");
+    var daysEl  = document.getElementById("scResultDays");
+
+    area.classList.remove("sc-hidden");
+    priceEl.className   = "sc-result-free";
+    priceEl.textContent = "Precio con descarga a confirmar";
+    detailEl.textContent= "El servicio con descarga no tiene tarifa cargada para este código postal. Puedes continuar con tu solicitud y el asesor comercial te confirmará el precio al contactarse.";
+    breakEl.classList.add("sc-hidden");
+    daysEl.classList.add("sc-hidden");
+
+    var origin = data.origin || (document.getElementById("scOriginCity") ? document.getElementById("scOriginCity").value : "");
+    var cp     = data.cp     || (document.getElementById("scPostalCode") ? document.getElementById("scPostalCode").value : "");
+    var sd = new FormData();
+    sd.append("action",        "silversea_save_shipping");
+    sd.append("nonce",         typeof silvSea !== "undefined" ? silvSea.nonce : "");
+    sd.append("method",        "delivery");
+    sd.append("origin",        origin);
+    sd.append("postal_code",   cp);
+    sd.append("transport",     currentTransport);
+    sd.append("price",         0);
+    sd.append("detail",        data.detail || "Con descarga a confirmar");
+    sd.append("price_pending", 1);
+    fetch(typeof silvSea !== "undefined" ? silvSea.ajaxUrl : "/wp-admin/admin-ajax.php", { method: "POST", body: sd });
+
+    scSyncFormFields({ method: "delivery", origin: origin, cp: cp, transport: currentTransport, price: 0, pickup: "", price_pending: true });
+
+    setTimeout(function() { area.scrollIntoView({ behavior: "smooth", block: "nearest" }); }, 50);
+  }
   /*  CALCULAR  */
   window.scCalculate = function () {
     scClearResult(); if (!scValidate()) return;
@@ -615,7 +665,7 @@ function scShowDeposito(city, infoId) {
     document.addEventListener('silversea:shipping:saved', function(e) {
       var d = e.detail || {};
       if ( d.method === 'pickup' && d.pickup )                          { quoteConfirmedThisVisit = true; updateAddBtnState(true); }
-      if ( d.method === 'delivery' && (d.price > 0 || d.no_tarifa) ) { quoteConfirmedThisVisit = true; updateAddBtnState(true); }
+      if ( d.method === 'delivery' && (d.price > 0 || d.no_tarifa || d.price_pending) ) { quoteConfirmedThisVisit = true; updateAddBtnState(true); }
     });
 
     /* Interceptar el click en el botón YITH para mostrar mensaje si no hay cotización */
@@ -774,8 +824,9 @@ function scShowDeposito(city, infoId) {
     ? silvSea.extras : [];
   if (!extras.length) return;
 
-  /* Estado global de selección (compartido entre todos los grids) */
+  /* Estado global de selección (compartido entre todos los grids y expuesto para scShowResult) */
   var selectedValues = {};
+  window.scSelectedExtras = selectedValues;
 
   /* Devuelve todos los inputs WAPO nativos que coinciden por value */
   function wapoInputsByValue(value) {
@@ -827,12 +878,12 @@ function scShowDeposito(city, infoId) {
       card.appendChild(desc);
     }
 
-    if (extra.price && extra.price > 0) {
+    /* if (extra.price && extra.price > 0) {
       var priceEl = document.createElement('span');
       priceEl.className = 'sc-extra-price';
       priceEl.textContent = 'Desde ' + extra.price.toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' €';
       card.appendChild(priceEl);
-    }
+    } */
 
     /* Card → sincronizar todos los grids + WAPO nativo */
     card.addEventListener('click', function () {
@@ -1026,51 +1077,78 @@ function scShowDeposito(city, infoId) {
    selecciona una ciudad en el cotizador.
 ──────────────────────────────────────────────────────────── */
 (function () {
+  var showProductPrice = (typeof silvSea !== 'undefined' && silvSea.showProductPrice === '1');
+  var isModeSingle     = (typeof silvSea !== 'undefined' && silvSea.mode === 'single');
   var cityPrices = (typeof silvSea !== 'undefined' && silvSea.productCityPrices)
     ? silvSea.productCityPrices : {};
 
-  if ( ! Object.keys(cityPrices).length ) return;
+  if (!isModeSingle) return;
+  if (!showProductPrice && !Object.keys(cityPrices).length) return;
 
   var $ = typeof jQuery !== 'undefined' ? jQuery : null;
 
   function formatPrice(value) {
-    return parseFloat(value).toLocaleString('es-ES', {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2
-    });
+    return parseFloat(value).toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+
+  /* Devuelve nuestro elemento de precio, creandolo por JS si el hook PHP no disparo */
+  function getOurEl() {
+    var el = document.getElementById('silversea-product-price');
+    if (!el && showProductPrice) {
+      el = document.createElement('div');
+      el.id = 'silversea-product-price';
+      el.className = 'price silversea-product-price-display';
+      el.style.display = 'none';
+      var form = document.querySelector('form.cart');
+      if (form) form.parentNode.insertBefore(el, form);
+    }
+    return el;
   }
 
   function applyPrice(city) {
-    if ( ! city || ! cityPrices[city] ) return;
-    var price = parseFloat(cityPrices[city]);
-    if ( isNaN(price) ) return;
+    /* Nuestro elemento: siempre actualizado cuando el toggle esta ON */
+    if (showProductPrice) {
+      var el = getOurEl();
+      if (el) {
+        if (!city) {
+          el.style.display = 'none';
+          el.innerHTML = '';
+        } else if (cityPrices[city] && parseFloat(cityPrices[city]) > 0) {
+          el.style.display = '';
+          el.innerHTML = '<span class="woocommerce-Price-amount amount">'
+            + '<bdi><span class="woocommerce-Price-currencySymbol">&euro;&nbsp;</span>'
+            + formatPrice(parseFloat(cityPrices[city])) + '</bdi></span>';
+        } else {
+          el.style.display = '';
+          el.innerHTML = '<span class="silversea-price-unavailable">No disponible</span>';
+        }
+      }
+    }
 
-    var html = '<span class="woocommerce-Price-amount amount">'
-             + '<bdi><span class="woocommerce-Price-currencySymbol">€ </span>'
-             + formatPrice(price) + '</bdi></span>';
-
-    /* Actualizar el elemento de precio de WooCommerce */
-    var $price = $ ? $('form.cart').closest('.product').find('.price').first()
-                   : document.querySelector('.product .price');
-
-    if ( $ && $price.length ) {
-      $price.html(html).attr('data-sc-city', city);
-    } else if ( $price ) {
-      $price.innerHTML  = html;
-      $price.dataset.scCity = city;
+    /* Elemento .price nativo de WC (solo actualizado cuando hay precio) */
+    if (city && cityPrices[city] && parseFloat(cityPrices[city]) > 0) {
+      var price = parseFloat(cityPrices[city]);
+      var html  = '<span class="woocommerce-Price-amount amount">'
+                + '<bdi><span class="woocommerce-Price-currencySymbol">&euro;&nbsp;</span>'
+                + formatPrice(price) + '</bdi></span>';
+      if ($) {
+        var $np = $('form.cart').closest('.product').find('.price').first();
+        if ($np.length) $np.html(html).attr('data-sc-city', city);
+      } else {
+        var np = document.querySelector('.product .price');
+        if (np) { np.innerHTML = html; np.dataset.scCity = city; }
+      }
     }
   }
 
-  /* Exponer para que el cotizador llame al cambiar ciudad */
   window.scUpdateProductPrice = applyPrice;
 
-  /* Re-aplicar cuando WC actualiza el precio al seleccionar variación */
-  if ( $ ) {
+  /* Re-aplicar cuando WC actualiza precio al seleccionar variacion */
+  if ($) {
     $(function() {
       $('form.cart').on('found_variation', function() {
-        var $price = $('form.cart').closest('.product').find('.price').first();
-        var city   = $price.attr('data-sc-city');
-        if ( city ) setTimeout(function() { applyPrice(city); }, 20);
+        var city = $('form.cart').closest('.product').find('.price').first().attr('data-sc-city');
+        if (city) setTimeout(function() { applyPrice(city); }, 20);
       });
     });
   }

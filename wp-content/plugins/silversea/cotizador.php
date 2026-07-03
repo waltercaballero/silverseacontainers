@@ -69,7 +69,7 @@ function silversea_render_product_order_page() {
 
     $args = [
         'post_type'      => 'product',
-        'post_status'    => 'publish',
+        'post_status'    => ['publish', 'draft', 'private', 'pending'],
         'posts_per_page' => -1,
         'orderby'        => ['menu_order' => 'ASC', 'title' => 'ASC'],
     ];
@@ -145,6 +145,7 @@ function silversea_render_product_order_page() {
           <span class="spo-type <?php echo $is_var ? 'spo-var' : 'spo-simple'; ?>">
             <?php echo $is_var ? 'Variable' : 'Simple'; ?>
           </span>
+          <?php echo silversea_estado_cell( $product, $post->ID ); ?>
         </li>
         <?php endforeach; ?>
       </ul>
@@ -275,7 +276,7 @@ function silversea_render_product_prices_page() {
 
     $args = [
         'post_type'      => 'product',
-        'post_status'    => 'publish',
+        'post_status'    => ['publish', 'draft', 'private', 'pending'],
         'posts_per_page' => -1,
         'orderby'        => 'title',
         'order'          => 'ASC',
@@ -339,9 +340,10 @@ function silversea_render_product_prices_page() {
           <tr>
             <th style="width:44px;"></th>
             <th>Producto / Variación</th>
-            <th style="width:130px;">SKU</th>
-            <th style="width:150px;">Precio regular €</th>
-            <th style="width:150px;">Precio oferta €</th>
+            <th style="width:100px;">SKU</th>
+            <th style="width:110px;">Estado</th>
+            <th style="width:140px;">Precio regular €</th>
+            <th style="width:140px;">Precio oferta €</th>
           </tr>
         </thead>
         <tbody>
@@ -369,6 +371,7 @@ function silversea_render_product_prices_page() {
                       data-parent="<?php echo $post->ID; ?>">▼ Ver</button>
             </td>
             <td><code class="spp-sku"><?php echo esc_html($sku); ?></code></td>
+            <td><?php echo silversea_estado_cell($product, $post->ID); ?></td>
             <td colspan="2" style="color:#9ca3af;font-size:12px;font-style:italic;">
               <?php echo $product->get_price_html(); ?>
             </td>
@@ -389,6 +392,7 @@ function silversea_render_product_prices_page() {
             <td style="background:#f8fafc;">
               <code class="spp-sku"><?php echo esc_html($var->get_sku() ?: '—'); ?></code>
             </td>
+            <td style="background:#f8fafc;"><?php echo silversea_estado_cell($var, $vid); ?></td>
             <td style="background:#f8fafc;">
               <input type="number" class="spp-input" step="0.01" min="0"
                      data-id="<?php echo $vid; ?>" data-field="regular"
@@ -415,6 +419,7 @@ function silversea_render_product_prices_page() {
               <span class="spp-badge spp-simple-badge">Simple</span>
             </td>
             <td><code class="spp-sku"><?php echo esc_html($sku); ?></code></td>
+            <td><?php echo silversea_estado_cell($product, $post->ID); ?></td>
             <td>
               <input type="number" class="spp-input" step="0.01" min="0"
                      data-id="<?php echo $post->ID; ?>" data-field="regular"
