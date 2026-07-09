@@ -867,7 +867,7 @@ function silversea_email_products_html_from_meta( $post_id, $show_prices, $city 
             $ap    = isset($addon_prices[$addon]) ? (float)$addon_prices[$addon] : 0.0;
             $label = '+ ' . esc_html($addon);
             if ( $show_prices && $ap > 0 )
-                $label .= ' — Desde ' . number_format($ap, 2, ',', '.') . ' €';
+                $label .= ' — Desde ' . number_format($ap, 2, ',', '.') . ' € por contenedor';
             $html .= '<span class="ad" style="display:inline-block;margin:3px 4px 0 0;font-size:12px;color:#fff;background:#222E5C;padding:2px 8px;border-radius:4px;">' . $label . '</span>';
         }
 
@@ -947,7 +947,7 @@ function silversea_email_products_html( $raq_content, $show_prices, $city = '' )
             $ap    = isset($addon_prices[$addon]) ? (float)$addon_prices[$addon] : 0.0;
             $label = '+ ' . esc_html($addon);
             if ( $show_prices && $ap > 0 )
-                $label .= ' — Desde ' . number_format($ap, 2, ',', '.') . ' €';
+                $label .= ' — Desde ' . number_format($ap, 2, ',', '.') . ' € por contenedor';
             $html .= '<span class="ad" style="display:inline-block;margin:3px 4px 0 0;font-size:12px;color:#fff;background:#222E5C;padding:2px 8px;border-radius:4px;">' . $label . '</span>';
         }
 
@@ -1129,9 +1129,9 @@ function silversea_email_template( $quote_id, $data, $products_html, $shipping_h
     $s .= '.ad{display:inline-block;margin:3px 4px 0 0;font-size:12px;color:#fff;background:#222E5C;padding:2px 8px;border-radius:4px;}';
     $s .= '.tb{background:#f8fafc;border-radius:8px;padding:16px 20px;}';
     $s .= '.tl{font-size:14px;font-weight:600;color:#0F2557;margin:0 0 3px;} .td{font-size:13px;color:#374151;margin:0;}';
-    $s .= '.tot{background:#0F2557;padding:20px 32px;} .tot table{width:100%;}';
-    $s .= '.tlab{font-size:15px;font-weight:700;color:#fff;} .tval{font-size:22px;font-weight:700;color:#fff;text-align:right;}';
-    $s .= '.tiva{font-size:12px;font-weight:400;color:#93C5FD;}';
+    $s .= '.tot{background:#EEF2FF;border-top:3px solid #0F2557;padding:20px 32px;} .tot table{width:100%;}';
+    $s .= '.tlab{font-size:15px;font-weight:700;color:#0F2557;} .tval{font-size:22px;font-weight:700;color:#0F2557;text-align:right;}';
+    $s .= '.tiva{font-size:12px;font-weight:400;color:#6b7280;}';
     $s .= '.ns{padding:24px 32px;border-bottom:1px solid #e5e7eb;}';
     $s .= '.ns ul{margin:8px 0 0;padding:0 0 0 20px;font-size:14px;color:#374151;line-height:1.9;}';
     $s .= '.ft{padding:20px 32px;background:#f8fafc;} .ft p{margin:0;font-size:12px;color:#9ca3af;line-height:1.65;}';

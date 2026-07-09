@@ -230,7 +230,7 @@ function scT(key, fallback) {
           var sel = silvSea.extras.filter(function(e) { return window.scSelectedExtras[e.value]; });
           if (sel.length) {
             extrasHtml = '<br><strong>Extras:</strong><br>' + sel.map(function(e) {
-              return e.label + (e.price > 0 ? ' — Desde ' + parseFloat(e.price).toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' €' : '');
+              return e.label + (e.price > 0 ? ' — Desde ' + parseFloat(e.price).toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' € por contenedor' : '');
             }).join('<br>');
           }
         }

@@ -19,7 +19,7 @@ function silversea_default_cities() {
             'key'          => 'barcelona',
             'name'         => 'Barcelona',
             'display_name' => '',
-            'depot'        => 'Almacenes de Depósito MARTEINER',
+            'depot'        => 'Almacenes de Depósito MARTAINER',
             'address'      => 'Ronda del port, 437, 08039 Barcelona',
             'modes'        => ['delivery', 'pickup'],
         ],
