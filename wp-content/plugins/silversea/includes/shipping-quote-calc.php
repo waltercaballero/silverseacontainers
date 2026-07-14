@@ -328,8 +328,14 @@ function silversea_build_truck_breakdown( $truck_list, $transport, $descarga_mod
                 $extra_label = ( ! $has_40 && $units >= 4 ) ? ' [equiv. 40ft]' : '';
                 $breakdown[] = [ 'label' => "Camión 1 (con grúa): {$lbl}{$extra_label}{$demo_tag}", 'price' => $price ];
             } else {
-                $price       = $p_sin + $p_extra_truck;
-                $breakdown[] = [ 'label' => 'Camión ' . ($idx + 1) . " (sin grúa + extra): {$lbl}{$demo_tag}", 'price' => $price ];
+                /* Si el CP no tiene tarifa sin descarga, usar precio con descarga sin el recargo extra. */
+                if ( $p_sin > 0.0 ) {
+                    $price = $p_sin + $p_extra_truck;
+                    $breakdown[] = [ 'label' => 'Camión ' . ($idx + 1) . " (sin grúa + extra): {$lbl}{$demo_tag}", 'price' => $price ];
+                } else {
+                    $price = silversea_calc_truck_con_descarga( $truck, $p_c20, $p_c40 );
+                    $breakdown[] = [ 'label' => 'Camión ' . ($idx + 1) . " (con descarga, alternativa): {$lbl}{$demo_tag}", 'price' => $price ];
+                }
             }
             $total += $price;
         }

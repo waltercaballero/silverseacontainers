@@ -1018,9 +1018,16 @@ function silversea_shipping_ajax_calc() {
                 }
                 $total += $price_truck;
             } else {
-                /* Camiones extra — sin descarga + costo extra */
-                $price_truck = $p_sin + $p_extra_truck;
-                $breakdown[] = ['label' => "Camión {$i} — sin grúa + servicio extra", 'price' => $price_truck];
+                /* Camiones extra — sin descarga + costo extra.
+                   Si el CP no tiene tarifa sin descarga, usar el precio con descarga sin el recargo extra. */
+                if ( $p_sin > 0.0 ) {
+                    $price_truck = $p_sin + $p_extra_truck;
+                    $breakdown[] = ['label' => "Camión {$i} — sin grúa + servicio extra", 'price' => $price_truck];
+                } else {
+                    $p_unit      = $product_size === 40 ? $p_c40 : $p_c20;
+                    $price_truck = $p_unit;
+                    $breakdown[] = ['label' => "Camión {$i} — con descarga (alternativa)", 'price' => $price_truck];
+                }
                 $total += $price_truck;
             }
         }
