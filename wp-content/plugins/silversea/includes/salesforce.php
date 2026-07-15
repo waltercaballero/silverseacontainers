@@ -585,6 +585,9 @@ function silversea_send_to_salesforce( $d, $products, $quote_id = 0 ) {
         'city'            => $d['city']   ?? '',
         'zip'             => $d['postal'] ?? '',
         'description'     => $description,
+        '00NUm00000UecA9' => $quote_id ? (string) $quote_id : '',
+        '00NUm00000Ue4V3' => 'SILVERSEA',
+        '00NUm00000Ue4V4' => 'SILVERSEA',
     ];
 
     /* ── Envío ── */
