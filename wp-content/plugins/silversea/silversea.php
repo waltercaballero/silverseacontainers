@@ -739,17 +739,20 @@ add_action( 'elementor_pro/forms/new_record', function( $record, $handler ) {
         '00N8a00000FXhD2' => $fields['00N8a00000FXhD2'] ?? '',	// City
 		'city'            => $fields['00N8a00000FXhD2'] ?? '',	// City
         '00N8a00000FXdRt' => $fields['00N8a00000FXdRt'] ?? '',	// Modality
+		//'00N8a00000FXdRt' => 'Buy',
 		'00N8a00000FXdRZ' => $fields['00N8a00000FXdRZ'] ?? '',	// Container Type
 		'00N8a00000FXdRo' => $fields['00N8a00000FXdRo'] ?? '',	// Quantity
 		'00NUm00000G445R' => $fields['00NUm00000G445R'] ?? '',	// Country
 		//'debug' => $fields['debug'] ? 1 : 0,
 		//'debugEmail' => 'waltercaballero@gmail.com',
 		//'city'            => $fields['city'] ?? '',	// City	- form de contacto
+		//'zip'             => $fields['zip'] ?? '',
 		//'description'     => $fields['description'] ?? '',
-		//'00N8a00000FXdRj' => $fields['00N8a00000FXdRj'] ?? 'Central America',	// Market
+		'00N8a00000FXdRj' => $fields['00N8a00000FXdRj'] ?? 'Europe',	// Market
 		//'00N8a00000FXdRe' => $fields['00N8a00000FXdRe'] ?? 'Cargo Worthy',	// Estado
+		'00NUm00000Ue4V3' => 'SILVERSEA',
+        '00NUm00000Ue4V4' => 'SILVERSEA',
     ];
-
 
 		$to = 'waltercaballero@gmail.com';
 		$subject = 'Nuevo formulario enviado desde SILVERSEA Containers';
