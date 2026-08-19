@@ -273,7 +273,7 @@ function silversea_handle_resend_single() {
 
     $headers = [
         'Content-Type: text/html; charset=UTF-8',
-        'From: Sergio Apuril <' . $email_from . '>',
+        'From: Sergio - SILVERSEA Containers <' . $email_from . '>',
     ];
     if ( $client_email ) $headers[] = 'Reply-To: ' . $client_name . ' <' . $client_email . '>';
 
@@ -1209,10 +1209,15 @@ function silversea_email_template( $quote_id, $data, $products_html, $shipping_h
     }
     $o .= '</div>';
     if ( $show_prices && $total_str ) {
-        $o .= '<div class="tot"><table><tr>';
-        $o .= '<td class="tlab">Total estimado</td>';
-        $o .= '<td class="tval">&#8364; ' . $total_str . ' <span class="tiva">+ IVA</span></td>';
-        $o .= '</tr></table></div>';
+        $o .= '<div style="background:#EEF2FF;border-top:3px solid #0F2557;padding:24px 32px;margin-top:8px;">';
+        $o .= '<table width="100%" cellpadding="0" cellspacing="0" border="0"><tr>';
+        $o .= '<td style="font-size:14px;font-weight:700;color:#0F2557;vertical-align:middle;">TOTAL ESTIMADO</td>';
+        $o .= '<td style="text-align:right;vertical-align:middle;">';
+        $o .= '<span style="font-size:28px;font-weight:700;color:#0F2557;">&#8364;&nbsp;' . $total_str . '</span>';
+        $o .= '&nbsp;<span style="font-size:13px;font-weight:400;color:#6b7280;">+ IVA</span>';
+        $o .= '</td>';
+        $o .= '</tr></table>';
+        $o .= '</div>';
     }
 
     /* ── Bloque 4: Lo que garantizamos ── */
@@ -1285,7 +1290,7 @@ function silversea_send_admin_email( $quote_id, $data ) {
 
     $headers_base = [
         'Content-Type: text/html; charset=UTF-8',
-        'From: Sergio Apuril <' . $email_from . '>',
+        'From: Sergio - SILVERSEA Containers <' . $email_from . '>',
     ];
     if ( $data['email'] ) {
         $headers_base[] = 'Reply-To: ' . $data['name'] . ' <' . $data['email'] . '>';
