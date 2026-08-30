@@ -131,6 +131,7 @@ function lcs_get_countries() {
         'us' => 'Estados Unidos',
         'gb' => 'Reino Unido',
         'ea' => 'Emiratos &Aacute;rabes',
+		'pr' => 'Puerto Rico',
     ];
 }
 
