@@ -49,7 +49,7 @@ function silversea_ajax_save_shipping() {
 
 /* ══════════════════════════════════════════════════════════════
    2.  CPT — silversea_quote
-       Registra nuestro propio post type para guardar cotizaciones
+       Registra nuestro propio post type para guardar presupuestos
        sin depender de YITH Premium.
 ══════════════════════════════════════════════════════════════ */
 
@@ -58,16 +58,16 @@ add_action( 'init', 'silversea_register_quote_cpt' );
 function silversea_register_quote_cpt() {
     register_post_type( 'silversea_quote', [
         'labels' => [
-            'name'               => 'Cotizaciones',
-            'singular_name'      => 'Cotización',
-            'add_new'            => 'Nueva cotización',
-            'add_new_item'       => 'Nueva cotización',
-            'edit_item'          => 'Editar cotización',
-            'view_item'          => 'Ver cotización',
-            'all_items'          => 'Todas las cotizaciones',
-            'search_items'       => 'Buscar cotizaciones',
-            'not_found'          => 'No se encontraron cotizaciones.',
-            'not_found_in_trash' => 'No hay cotizaciones en la papelera.',
+            'name'               => 'Presupuestos',
+            'singular_name'      => 'Presupuesto',
+            'add_new'            => 'Nuevo presupuesto',
+            'add_new_item'       => 'Nuevo presupuesto',
+            'edit_item'          => 'Editar presupuesto',
+            'view_item'          => 'Ver presupuesto',
+            'all_items'          => 'Todos los presupuestos',
+            'search_items'       => 'Buscar presupuestos',
+            'not_found'          => 'No se encontraron presupuestos.',
+            'not_found_in_trash' => 'No hay presupuestos en la papelera.',
         ],
         'public'            => false,
         'show_ui'           => true,
@@ -86,7 +86,7 @@ add_filter( 'manage_silversea_quote_posts_columns', 'silversea_quote_columns' );
 function silversea_quote_columns( $cols ) {
     return [
         'cb'          => '<input type="checkbox">',
-        'title'       => 'Cotización',
+        'title'       => 'Presupuesto',
         'sq_client'   => 'Cliente',
         'sq_email'    => 'Email',
         'sq_phone'    => 'Teléfono',
@@ -138,7 +138,7 @@ function silversea_quote_column_content( $col, $post_id ) {
 
 /* Metabox de detalle completo */
 add_action( 'add_meta_boxes', function() {
-    add_meta_box( 'silversea_quote_detail', 'Detalle de la cotización',
+    add_meta_box( 'silversea_quote_detail', 'Detalle del presupuesto',
         'silversea_quote_metabox', 'silversea_quote', 'normal', 'high' );
     add_meta_box( 'silversea_quote_email_sales', '📧 Email enviado a ventas',
         'silversea_quote_email_sales_metabox', 'silversea_quote', 'normal', 'default' );
@@ -1037,6 +1037,159 @@ function silversea_email_shipping_html( $data, $show_prices ) {
     return $html;
 }
 
+/* ══════════════════════════════════════════════════════════════
+   FILAS ITEMIZADAS PARA EL EMAIL AL CLIENTE (formato tipo factura)
+   Un <tr> por contenedor + un <tr> por cada extra seleccionado.
+   Usadas solo en silversea_email_template() (rama cliente, show_prices=1).
+══════════════════════════════════════════════════════════════ */
+
+function silversea_email_client_row_html( $label_html, $sub_html, $price_html ) {
+    $html  = '<tr>';
+    $html .= '<td style="padding:12px 0 10px 0;border-bottom:1px solid #EFEFEF;font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#222D5A;">';
+    $html .= $label_html;
+    if ( $sub_html ) $html .= '<div style="font-size:12px;color:#5A6478;padding-top:2px;">' . $sub_html . '</div>';
+    $html .= '</td>';
+    $html .= '<td align="right" valign="top" style="padding:12px 0 10px 0;border-bottom:1px solid #EFEFEF;white-space:nowrap;font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#222D5A;">' . $price_html . '</td>';
+    $html .= '</tr>';
+    return $html;
+}
+
+function silversea_email_client_product_rows( $raq_content, $city = '' ) {
+    $html = '';
+    foreach ( $raq_content as $raq ) {
+        $pid      = ! empty($raq['variation_id']) ? $raq['variation_id'] : $raq['product_id'];
+        $_product = wc_get_product( $pid );
+        if ( ! $_product ) continue;
+
+        $qty        = (int)( $raq['quantity'] ?? 1 );
+        $title      = $_product->get_title();
+        $city_price = $city ? silversea_get_product_city_price( $pid, $city ) : null;
+        $price      = $city_price !== null ? $city_price : (float) $_product->get_price();
+
+        $desc_id     = $_product->is_type('variation') ? $_product->get_parent_id() : $_product->get_id();
+        $description = wp_trim_words( wp_strip_all_tags( get_post_field('post_content', $desc_id) ), 30, '…' );
+
+        $condicion_terms = wc_get_product_terms( $_product->get_id(), 'pa_condicion', ['fields' => 'names'] );
+        $condicion       = ! empty($condicion_terms) ? $condicion_terms[0] : '';
+
+        $color_attr = '';
+        if ( ! empty($raq['variation_id']) ) {
+            $var = wc_get_product( (int)$raq['variation_id'] );
+            if ( $var ) {
+                $c_slug = $var->get_attribute('pa_color-ral');
+                if ( $c_slug ) {
+                    $c_term     = get_term_by('slug', $c_slug, 'pa_color-ral');
+                    $color_attr = $c_term ? $c_term->name : $c_slug;
+                }
+            }
+        } else {
+            $c_terms    = wc_get_product_terms( $_product->get_id(), 'pa_color-ral', ['fields' => 'names'] );
+            $color_attr = ! empty($c_terms) ? $c_terms[0] : '';
+        }
+        $is_usado    = ( strtolower($condicion) === 'usado' );
+        $color_label = $is_usado ? 'Color según disponibilidad' : $color_attr;
+
+        $subtitle   = array_filter( [ $condicion, $color_label ] );
+        $label      = (int)$qty . ' × ' . esc_html($title) . ( $subtitle ? ' · ' . esc_html(implode(' · ', $subtitle)) : '' );
+        $price_html = ( $price > 0 ) ? number_format($price * $qty, 2, ',', '.') . ' €' : '';
+
+        $html .= silversea_email_client_row_html( $label, $description ? esc_html($description) : '', $price_html );
+
+        $addons       = $raq['silversea_addons']       ?? [];
+        $addon_prices = $raq['silversea_addon_prices'] ?? [];
+        foreach ( $addons as $addon ) {
+            $ap         = isset($addon_prices[$addon]) ? (float)$addon_prices[$addon] : 0.0;
+            $label      = esc_html($addon) . ' <span style="font-size:12px;color:#5A6478;">(seleccionado)</span>';
+            $price_html = ( $ap > 0 ) ? number_format($ap * $qty, 2, ',', '.') . ' €' : '';
+            $html .= silversea_email_client_row_html( $label, '', $price_html );
+        }
+    }
+    return $html;
+}
+
+function silversea_email_client_product_rows_from_meta( $post_id, $city = '' ) {
+    $products = json_decode( get_post_meta($post_id, '_sq_products', true) ?: '[]', true );
+    $html = '';
+    foreach ( $products as $item ) {
+        $name = $item['name'] ?? '';
+        $qty  = (int)( $item['qty'] ?? 1 );
+        $addons       = $item['addons']       ?? [];
+        $addon_prices = $item['addon_prices'] ?? [];
+
+        $_product  = silversea_resolve_quote_product( $item );
+        $price     = 0.0;
+        $description = '';
+        $condicion   = $item['condition'] ?? '';
+
+        if ( $_product ) {
+            $city_p = $city ? silversea_get_product_city_price( $_product->get_id(), $city ) : null;
+            $price  = $city_p !== null ? $city_p : (float) $_product->get_price();
+            $desc_id = $_product->is_type('variation') ? $_product->get_parent_id() : $_product->get_id();
+            $description = wp_trim_words( wp_strip_all_tags( get_post_field('post_content', $desc_id) ), 30, '…' );
+            $c_terms   = wc_get_product_terms( $_product->get_id(), 'pa_condicion', ['fields' => 'names'] );
+            $condicion = ! empty($c_terms) ? $c_terms[0] : $condicion;
+        }
+
+        $color    = $item['color'] ?? '';
+        $is_usado = ( strtolower($condicion) === 'usado' );
+        $color_label = $is_usado ? 'Color según disponibilidad' : $color;
+
+        $subtitle   = array_filter( [ $condicion, $color_label ] );
+        $label      = (int)$qty . ' × ' . esc_html($name) . ( $subtitle ? ' · ' . esc_html(implode(' · ', $subtitle)) : '' );
+        $price_html = ( $price > 0 ) ? number_format($price * $qty, 2, ',', '.') . ' €' : '';
+
+        $html .= silversea_email_client_row_html( $label, $description ? esc_html($description) : '', $price_html );
+
+        foreach ( $addons as $addon ) {
+            $ap         = isset($addon_prices[$addon]) ? (float)$addon_prices[$addon] : 0.0;
+            $label      = esc_html($addon) . ' <span style="font-size:12px;color:#5A6478;">(seleccionado)</span>';
+            $price_html = ( $ap > 0 ) ? number_format($ap * $qty, 2, ',', '.') . ' €' : '';
+            $html .= silversea_email_client_row_html( $label, '', $price_html );
+        }
+    }
+    return $html;
+}
+
+/* Fila de transporte para la tabla itemizada del email cliente.
+   Devuelve ['html' => <tr>..., 'pending' => bool] — pending=true cuando
+   el precio de transporte todavía no se puede calcular (CP sin tarifa). */
+function silversea_email_client_shipping_row( $data ) {
+    $method = $data['method'] ?? '';
+    $transp = $data['transport'] ?? 'sin';
+    $desc   = silversea_get_transport_desc( $transp, $method );
+
+    if ( $method === 'pickup' ) {
+        $pickup_label = silversea_origin_label( $data['pickup'] ?? '' );
+        $label = 'Recogida en dep&#xF3;sito &middot; ' . esc_html($pickup_label);
+        $price_html = '<span style="color:#1D9E75;font-weight:600;">Sin coste</span>';
+        return [ 'html' => silversea_email_client_row_html( $label, esc_html($desc), $price_html ), 'pending' => false ];
+    }
+
+    $con          = $data['consolidated'] ?? null;
+    $origin_label = silversea_origin_label( $data['origin'] ?? '' );
+    $transp_label = $transp === 'con' ? 'con descarga' : 'sin descarga';
+    $trucks       = (int) ( $con['trucks'] ?? $data['trucks'] ?? 0 );
+    $trucks_label = $trucks > 0 ? ( $trucks . ' cami&#xF3;n' . ( $trucks > 1 ? 'es' : '' ) . ', ' ) : '';
+
+    $label = 'Transporte desde ' . esc_html($origin_label) . ' hasta CP ' . esc_html($data['cp'] ?? '')
+           . ' <span style="font-size:12px;color:#5A6478;">(' . $trucks_label . $transp_label . ')</span>';
+
+    $price = null;
+    if ( $con && isset($con['total']) && (float)$con['total'] > 0 ) {
+        $price = (float) $con['total'];
+    } elseif ( isset($data['price']) && (float)$data['price'] > 0 ) {
+        $price = (float) $data['price'];
+    }
+
+    if ( $price !== null ) {
+        $price_html = number_format($price, 2, ',', '.') . ' €';
+    } else {
+        $price_html = '<span style="color:#d97706;">A confirmar</span>';
+    }
+
+    return [ 'html' => silversea_email_client_row_html( $label, esc_html($desc), $price_html ), 'pending' => $price === null ];
+}
+
 /* Construir total estimado para email cliente */
 function silversea_email_total( $raq_content, $data ) {
     $city  = silversea_derive_price_city( $data );
@@ -1080,7 +1233,7 @@ function silversea_email_template( $quote_id, $data, $products_html, $shipping_h
             . '<body style="font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',sans-serif;color:#111;margin:0;padding:0;background:#f5f5f5;">'
             . '<div style="max-width:620px;margin:32px auto;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,.08);">'
             . '<div style="background:#0F2557;padding:28px 32px;">'
-            . '<h1 style="margin:0;color:#fff;font-size:20px;font-weight:600;">Nueva Solicitud de Cotización</h1>'
+            . '<h1 style="margin:0;color:#fff;font-size:20px;font-weight:600;">Nueva Solicitud de Presupuesto</h1>'
             . '<p style="margin:6px 0 0;color:#93C5FD;font-size:13px;">Quote #' . $quote_id . ' · ' . date('d/m/Y H:i') . '</p>'
             . '</div>'
             . '<div style="padding:24px 32px;border-bottom:1px solid #e5e7eb;">'
@@ -1107,171 +1260,219 @@ function silversea_email_template( $quote_id, $data, $products_html, $shipping_h
     }
 
     /* ══════════════════════════════
-       EMAIL CLIENTE — narrativo
+       EMAIL CLIENTE — formato presupuesto (tabla itemizada)
     ══════════════════════════════ */
 
-    $total_str = '';
-    if ( $show_prices && ! empty($data['raq_content']) ) {
-        $total = silversea_email_total( $data['raq_content'], $data );
-        if ( $total > 0 ) $total_str = number_format($total, 2, ',', '.');
+    /* IVA fijo 21% y validez fija de 7 días desde la fecha de la presupuesto.
+       Ambos son literales a propósito (decisión del negocio, no configurable). */
+    $iva_rate       = 0.21;
+    $validity_days  = 7;
+    $quote_date_raw = get_post_field( 'post_date', $quote_id ) ?: current_time( 'mysql' );
+    $validity_date  = date( 'd/m/Y', strtotime( $quote_date_raw . ' +' . $validity_days . ' days' ) );
+
+    $raq        = $data['raq_content'] ?? [];
+    $price_city = silversea_derive_price_city( $data );
+
+    $subtotal      = null;
+    $quote_rows    = '';
+    $totals_html   = '';
+    $pending_note  = '';
+
+    if ( $show_prices ) {
+        $quote_rows = ! empty($raq)
+            ? silversea_email_client_product_rows( $raq, $price_city )
+            : silversea_email_client_product_rows_from_meta( $quote_id, $price_city );
+
+        $shipping_row = silversea_email_client_shipping_row( $data );
+        $quote_rows  .= $shipping_row['html'];
+
+        if ( ! $shipping_row['pending'] && ! empty($raq) ) {
+            $subtotal = silversea_email_total( $raq, $data );
+        }
+
+        if ( $subtotal !== null && $subtotal > 0 ) {
+            $iva   = $subtotal * $iva_rate;
+            $total = $subtotal + $iva;
+            $quote_rows .= '<tr><td style="padding:10px 0 4px 0;font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#222D5A;">Subtotal</td>'
+                         . '<td align="right" style="padding:10px 0 4px 0;white-space:nowrap;font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#222D5A;">' . number_format($subtotal, 2, ',', '.') . ' €</td></tr>';
+            $quote_rows .= '<tr><td style="padding:0 0 10px 0;font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#222D5A;">IVA (21%)</td>'
+                         . '<td align="right" style="padding:0 0 10px 0;white-space:nowrap;font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#222D5A;">' . number_format($iva, 2, ',', '.') . ' €</td></tr>';
+
+            $totals_html .= '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#F5F7FB;border-left:4px solid #1676BB;">';
+            $totals_html .= '<tr><td style="padding:14px 16px;">';
+            $totals_html .= '<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>';
+            $totals_html .= '<td style="font-family:Arial,Helvetica,sans-serif;font-size:15px;font-weight:700;color:#222D5A;">TOTAL</td>';
+            $totals_html .= '<td align="right" style="font-family:Arial,Helvetica,sans-serif;font-size:20px;font-weight:700;color:#222D5A;white-space:nowrap;">' . number_format($total, 2, ',', '.') . ' € <span style="font-size:12px;font-weight:400;color:#5A6478;">IVA incl.</span></td>';
+            $totals_html .= '</tr></table>';
+            $totals_html .= '<div style="padding-top:10px;">';
+            $totals_html .= '<span style="display:inline-block;background-color:#E6AB10;color:#222D5A;font-family:Arial,Helvetica,sans-serif;font-size:12px;font-weight:700;padding:6px 12px;">PRECIO GARANTIZADO HASTA EL ' . esc_html($validity_date) . '</span>';
+            $totals_html .= '</div>';
+            $totals_html .= '</td></tr></table>';
+
+            $descarga_txt = ( ($data['transport'] ?? 'sin') === 'con' )
+                ? 'La descarga está incluida en el precio indicado.'
+                : 'La descarga no está incluida; puede añadirla al confirmar.';
+            $pending_note = 'Entrega estándar: 5 a 7 días hábiles desde la confirmación del pago. ' . $descarga_txt
+                          . ' Si su zona de entrega tiene acceso limitado, Sergio lo verificará con usted antes de confirmar, sin sorpresas en la factura.';
+        } else {
+            $pending_note = 'El precio final de transporte para su código postal será confirmado por su asesor comercial antes de emitir el total definitivo.';
+        }
+    } else {
+        $quote_rows = ! empty($raq)
+            ? silversea_email_products_html( $raq, false, $price_city )
+            : silversea_email_products_html_from_meta( $quote_id, false, $price_city );
+        $quote_rows .= silversea_email_shipping_html( $data, false );
     }
 
-    $disclaimer = ''; /* Nota de precio/BAF movida a la sección de Transporte */
+    /* Preheader (texto oculto de vista previa en la bandeja de entrada) */
+    $preheader = 'Su presupuesto #' . $quote_id
+               . ( $subtotal !== null && $subtotal > 0
+                    ? ' · Total ' . number_format($subtotal * (1 + $iva_rate), 2, ',', '.') . ' € IVA incluido · Precio garantizado hasta el ' . $validity_date
+                    : ' · Resumen de su solicitud' );
 
-    $s = 'body{margin:0;padding:0;background:#f5f5f5;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;color:#111;}';
-    $s .= '.wrap{max-width:620px;margin:32px auto;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,.08);}';
-    $s .= '.hd{background:#0F2557;padding:28px 32px;} .hd h1{margin:0;color:#fff;font-size:22px;font-weight:700;} .hd p{margin:4px 0 0;color:#93C5FD;font-size:13px;}';
-    $s .= '.bd{padding:28px 32px;} .gr{font-size:15px;line-height:1.65;color:#374151;margin:0 0 24px;}';
-    $s .= '.st{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#6b7280;margin:24px 0 12px;padding-bottom:8px;border-bottom:2px solid #f3f4f6;}';
-    $s .= '.pb{padding:12px 0;border-bottom:1px solid #f3f4f6;} .pb:last-child{border-bottom:none;}';
-    $s .= '.pn{margin:0 0 4px;font-size:15px;font-weight:600;color:#111;}';
-    $s .= '.pm{margin:2px 0;font-size:13px;color:#6b7280;} .pd{margin:4px 0;font-size:13px;color:#374151;font-style:italic;}';
-    $s .= '.ad{display:inline-block;margin:3px 4px 0 0;font-size:12px;color:#fff;background:#222E5C;padding:2px 8px;border-radius:4px;}';
-    $s .= '.tb{background:#f8fafc;border-radius:8px;padding:16px 20px;}';
-    $s .= '.tl{font-size:14px;font-weight:600;color:#0F2557;margin:0 0 3px;} .td{font-size:13px;color:#374151;margin:0;}';
-    $s .= '.tot{background:#EEF2FF;border-top:3px solid #0F2557;padding:20px 32px;} .tot table{width:100%;}';
-    $s .= '.tlab{font-size:15px;font-weight:700;color:#0F2557;} .tval{font-size:22px;font-weight:700;color:#0F2557;text-align:right;}';
-    $s .= '.tiva{font-size:12px;font-weight:400;color:#6b7280;}';
-    $s .= '.disc{margin:14px 0 0;font-size:11px;color:#aab0bb;font-style:italic;line-height:1.65;padding-top:12px;border-top:1px dashed #e5e7eb;}';
-
-    $o  = '<!DOCTYPE html><html><head><meta charset="UTF-8"><style>' . $s . '</style></head><body><div class="wrap">';
+    $o  = '<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"></head>';
+    $o .= '<body style="margin:0;padding:0;background-color:#EFEFEF;">';
+    $o .= '<div style="display:none;max-height:0;overflow:hidden;mso-hide:all;">' . esc_html($preheader) . '</div>';
+    $o .= '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#EFEFEF;"><tr><td align="center" style="padding:24px 12px;">';
+    $o .= '<table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background-color:#FFFFFF;">';
 
     /* ── Header ── */
-    $o .= '<div class="hd"><h1>SILVERSEA Containers</h1><p>Resumen de su solicitud · #' . $quote_id . '</p></div>';
-
-    /* ── Bloque 1: Franja de marca ── */
-    $o .= '<div style="background:#122A6B;padding:12px 20px;">';
-    $o .= '<table width="100%" cellpadding="0" cellspacing="0" border="0"><tr>';
-    $o .= '<td style="text-align:center;padding:4px 5px;border-right:1px solid rgba(255,255,255,.2);">';
-    $o .= '<strong style="display:block;font-size:15px;font-weight:700;color:#fff;">2016</strong>';
-    $o .= '<span style="font-size:10px;color:#93C5FD;text-transform:uppercase;letter-spacing:.04em;">Fundaci&#xF3;n</span>';
+    $o .= '<tr><td style="background-color:#222D5A;padding:22px 28px;">';
+    $o .= '<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>';
+    $o .= '<td style="font-family:Arial,Helvetica,sans-serif;font-size:22px;letter-spacing:1px;color:#FFFFFF;padding:10px 0;">';
+    $o .= '<img src="https://silverseacontainers.com/es/wp-content/uploads/sites/2/2024/11/logo.png" width="160" style="display:block;" />';
+    //$o .= '<span style="font-weight:300;color:#9FB0C3;">SILVER</span><span style="font-weight:700;color:#FFFFFF;">SEA</span>';
+    //$o .= '<span style="font-size:10px;letter-spacing:3px;color:#9FB0C3;font-weight:400;">&nbsp;CONTAINERS</span>';
     $o .= '</td>';
-    $o .= '<td style="text-align:center;padding:4px 5px;border-right:1px solid rgba(255,255,255,.2);">';
-    $o .= '<strong style="display:block;font-size:15px;font-weight:700;color:#fff;">+80.000</strong>';
-    $o .= '<span style="font-size:10px;color:#93C5FD;text-transform:uppercase;letter-spacing:.04em;">Contenedores</span>';
-    $o .= '</td>';
-    $o .= '<td style="text-align:center;padding:4px 5px;border-right:1px solid rgba(255,255,255,.2);">';
-    $o .= '<strong style="display:block;font-size:15px;font-weight:700;color:#fff;">+3.000</strong>';
-    $o .= '<span style="font-size:10px;color:#93C5FD;text-transform:uppercase;letter-spacing:.04em;">Clientes</span>';
-    $o .= '</td>';
-    $o .= '<td style="text-align:center;padding:4px 5px;border-right:1px solid rgba(255,255,255,.2);">';
-    $o .= '<strong style="display:block;font-size:15px;font-weight:700;color:#fff;">+120</strong>';
-    $o .= '<span style="font-size:10px;color:#93C5FD;text-transform:uppercase;letter-spacing:.04em;">Dep&#xF3;sitos</span>';
-    $o .= '</td>';
-    $o .= '<td style="text-align:center;padding:4px 5px;border-right:1px solid rgba(255,255,255,.2);">';
-    $o .= '<strong style="display:block;font-size:15px;font-weight:700;color:#fff;">+50</strong>';
-    $o .= '<span style="font-size:10px;color:#93C5FD;text-transform:uppercase;letter-spacing:.04em;">Puertos</span>';
-    $o .= '</td>';
-    $o .= '<td style="text-align:center;padding:4px 5px;">';
-    $o .= '<strong style="display:block;font-size:15px;font-weight:700;color:#fff;">+24.520</strong>';
-    $o .= '<span style="font-size:10px;color:#93C5FD;text-transform:uppercase;letter-spacing:.04em;">Ton. CO&#x2082; 2024</span>';
+    $o .= '<td align="right" style="font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#C9D2E4;">';
+    $o .= 'Presupuesto <span style="color:#FFFFFF;font-weight:700;">#' . $quote_id . '</span><br>';
+    $o .= '<span style="font-size:12px;">' . date_i18n('j F Y', strtotime($quote_date_raw)) . '</span>';
     $o .= '</td>';
     $o .= '</tr></table>';
-    $o .= '</div>';
+    $o .= '</td></tr>';
 
-    /* ── Bloque 2: Asesor ── */
-    $o .= '<div style="padding:24px 32px;border-bottom:1px solid #e5e7eb;background:#f8fafc;">';
-    $o .= '<table width="100%" cellpadding="0" cellspacing="0" border="0"><tr>';
-    $o .= '<td style="width:84px;vertical-align:top;">';
-    $o .= '<img src="https://silverseacontainers.com/es/wp-content/uploads/sites/2/2026/08/sergio.jpg"'
-       .  ' width="72" height="72" alt="Sergio Apuril"'
-       .  ' style="border-radius:50%;display:block;width:72px;height:72px;object-fit:cover;">';
-    $o .= '</td>';
-    $o .= '<td style="vertical-align:top;padding-left:16px;">';
-    $o .= '<p style="margin:0 0 2px;font-size:16px;font-weight:700;color:#0F2557;">Sergio Apuril</p>';
-    $o .= '<p style="margin:0 0 10px;font-size:13px;color:#6b7280;">Asesor Comercial · SILVERSEA Containers</p>';
-    $o .= '<p style="margin:0;line-height:2;">';
-    $o .= '<a href="tel:+34664803101" style="font-size:13px;color:#374151;text-decoration:none;margin-right:14px;">&#128222; +34 664 80 31 01</a>';
-    $o .= '<a href="https://wa.me/34664803101" style="font-size:13px;color:#25D366;text-decoration:none;margin-right:14px;">&#128172; WhatsApp</a>';
-    $o .= '<a href="https://www.linkedin.com/in/sergio-a-660b2b131/" style="font-size:13px;color:#0077B5;text-decoration:none;">in LinkedIn</a>';
-    $o .= '</p>';
-    $o .= '</td>';
-    $o .= '</tr></table>';
-    $o .= '<p style="margin:16px 0 0;font-size:13px;color:#374151;font-style:italic;line-height:1.65;padding:12px 16px;background:#EEF2FF;border-left:3px solid #0F2557;border-radius:0 6px 6px 0;">'
-       .  'Esta cotizaci&#xF3;n se genera autom&#xE1;ticamente. Me pondr&#xE9; en contacto con usted en menos de 24 horas. '
-       .  'Si prefiere adelantarse, este es mi m&#xF3;vil: <strong>+34 664 80 31 01</strong>.'
-       .  '</p>';
-    $o .= '</div>';
+    /* ── Saludo ── */
+    $o .= '<tr><td style="padding:28px 28px 0 28px;">';
+    $o .= '<div style="font-family:Arial,Helvetica,sans-serif;font-size:15px;color:#222D5A;line-height:22px;">Hola <strong>' . $name . '</strong>,</div>';
+    $o .= '<div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#222D5A;line-height:21px;padding-top:12px;">'
+       .  'Gracias por contactar con SILVERSEA Containers. A continuación le enviamos el resumen de su solicitud'
+       .  ( $show_prices ? ' y una estimación de precios para que tenga una referencia clara.' : '.' ) . '</div>';
+    $o .= '</td></tr>';
 
-    /* ── Bloque 3: Cotización (contenido existente) ── */
-    $o .= '<div class="bd">';
-    $o .= '<p class="gr">Hola <strong>' . $name . '</strong>,<br><br>'
-       .  'Gracias por contactar con <strong>SILVERSEA Containers</strong>. '
-       .  'A continuaci&#xF3;n le enviamos el resumen de su solicitud'
-       .  ( $show_prices ? ' y una estimaci&#xF3;n de precios para que tenga una referencia clara.' : '.' ) . '</p>';
-    $o .= '<p class="st" style="margin-top:0;">Resumen de su solicitud</p>';
-    $o .= $products_html;
-    $o .= '<p class="st">Transporte</p>';
-    $o .= $shipping_html;
+    /* ── Resumen de su solicitud ── */
+    $o .= '<tr><td style="padding:26px 28px 0 28px;">';
+    $o .= '<div style="font-family:Arial,Helvetica,sans-serif;font-size:11px;font-weight:700;letter-spacing:2px;color:#5A6478;padding-bottom:10px;border-bottom:2px solid #222D5A;">RESUMEN DE SU SOLICITUD</div>';
+    $o .= '<table role="presentation" width="100%" cellpadding="0" cellspacing="0">' . $quote_rows . '</table>';
+    $o .= $totals_html;
+    if ( $pending_note ) {
+        $o .= '<div style="font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#5A6478;line-height:18px;padding-top:10px;">' . esc_html($pending_note) . '</div>';
+    }
+    $o .= '</td></tr>';
+
+    /* ── Su mensaje ── */
     if ( $message ) {
-        $o .= '<p class="st">Su mensaje</p>';
-        $o .= '<p style="font-size:14px;color:#374151;font-style:italic;margin:0;">' . nl2br(esc_html($message)) . '</p>';
-    }
-    $o .= '</div>';
-    if ( $show_prices && $total_str ) {
-        $o .= '<div style="background:#EEF2FF;border-top:3px solid #0F2557;padding:24px 32px;margin-top:8px;">';
-        $o .= '<table width="100%" cellpadding="0" cellspacing="0" border="0"><tr>';
-        $o .= '<td style="font-size:14px;font-weight:700;color:#0F2557;vertical-align:middle;">TOTAL ESTIMADO</td>';
-        $o .= '<td style="text-align:right;vertical-align:middle;">';
-        $o .= '<span style="font-size:28px;font-weight:700;color:#0F2557;">&#8364;&nbsp;' . $total_str . '</span>';
-        $o .= '&nbsp;<span style="font-size:13px;font-weight:400;color:#6b7280;">+ IVA</span>';
-        $o .= '</td>';
-        $o .= '</tr></table>';
-        $o .= '</div>';
+        $o .= '<tr><td style="padding:18px 28px 0 28px;">';
+        $o .= '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#FAF8EF;"><tr>';
+        $o .= '<td style="padding:12px 16px;font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#5A6478;">';
+        $o .= '<strong style="color:#222D5A;">Su mensaje:</strong> ' . nl2br(esc_html($message));
+        $o .= '</td></tr></table>';
+        $o .= '</td></tr>';
     }
 
-    /* ── Bloque 4: Lo que garantizamos ── */
-    $o .= '<div style="padding:24px 32px;border-bottom:1px solid #e5e7eb;">';
-    $o .= '<p style="margin:0 0 14px;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#6b7280;">Lo que garantizamos</p>';
-    $o .= '<table width="100%" cellpadding="0" cellspacing="0" border="0">';
-    $o .= '<tr><td style="padding:6px 0;font-size:14px;color:#374151;line-height:1.5;">&#10003;&nbsp;&nbsp;<strong>Condici&#xF3;n Cargo Worthy (CW)</strong> o superior, estanco y estructuralmente &#xED;ntegro.</td></tr>';
-    $o .= '<tr><td style="padding:6px 0;font-size:14px;color:#374151;line-height:1.5;">&#10003;&nbsp;&nbsp;<strong>Placa CSC</strong> (Convention for Safe Containers) con documentaci&#xF3;n t&#xE9;cnica.</td></tr>';
-    $o .= '<tr><td style="padding:6px 0;font-size:14px;color:#374151;line-height:1.5;">&#10003;&nbsp;&nbsp;<strong>48 horas</strong> para resolver cualquier defecto de estanqueidad, sin coste.</td></tr>';
-    $o .= '<tr><td style="padding:6px 0;font-size:14px;color:#374151;line-height:1.5;">&#10003;&nbsp;&nbsp;<strong>Servicio de recompra</strong> activo si deja de necesitarlo.</td></tr>';
+    /* ── Asesor ── */
+    $o .= '<tr><td style="padding:22px 28px 0 28px;">';
+    $o .= '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #E3E7EF;"><tr>';
+    $o .= '<td width="72" style="padding:16px 0 16px 16px;" valign="top">';
+    /* Foto real de Sergio. Alternativa con iniciales (mockup) queda comentada abajo por si se necesita en el futuro:
+    $o .= '<table role="presentation" cellpadding="0" cellspacing="0"><tr>'
+       .  '<td width="56" height="56" align="center" valign="middle" style="background-color:#222D5A;border-radius:28px;font-family:Arial,Helvetica,sans-serif;font-size:18px;font-weight:700;color:#FFFFFF;">SA</td>'
+       .  '</tr></table>';
+    */
+    $o .= '<img src="https://silverseacontainers.com/es/wp-content/uploads/sites/2/2026/08/sergio.jpg"'
+       .  ' width="56" height="56" alt="Sergio Apuril"'
+       .  ' style="border-radius:28px;display:block;width:56px;height:56px;object-fit:cover;">';
+    $o .= '</td>';
+    $o .= '<td style="padding:16px;" valign="top">';
+    $o .= '<div style="font-family:Arial,Helvetica,sans-serif;font-size:15px;font-weight:700;color:#222D5A;">Sergio Apuril</div>';
+    $o .= '<div style="font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#5A6478;padding-bottom:6px;">Su asesor comercial</div>';
+    $o .= '<div style="font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#222D5A;line-height:19px;">';
+    $o .= 'Le llamaré en menos de 24 horas para resolver cualquier duda. Si prefiere adelantarse: <a href="tel:+34664803101" style="color:#1676BB;text-decoration:none;font-weight:700;">+34 664 80 31 01</a>';
+    $o .= '</div>';
+    $o .= '<table role="presentation" cellpadding="0" cellspacing="0" style="margin-top:12px;"><tr>';
+    $o .= '<td align="center" bgcolor="#1676BB" style="border-radius:3px;">';
+    $o .= '<a href="https://wa.me/34664803101" style="display:inline-block;padding:10px 18px;font-family:Arial,Helvetica,sans-serif;font-size:13px;font-weight:700;color:#FFFFFF;text-decoration:none;">Escribir por WhatsApp</a>';
+    $o .= '</td></tr></table>';
+    $o .= '</td></tr></table>';
+    $o .= '</td></tr>';
+
+    /* ── Incluido en su compra ── */
+    $o .= '<tr><td style="padding:26px 28px 0 28px;">';
+    $o .= '<div style="font-family:Arial,Helvetica,sans-serif;font-size:11px;font-weight:700;letter-spacing:2px;color:#5A6478;padding-bottom:10px;">INCLUIDO EN SU COMPRA</div>';
+    $o .= '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#222D5A;">';
+    $o .= '<tr><td width="50%" valign="top" style="padding:6px 10px 6px 0;">✓ <strong>Garantía de estanqueidad</strong>: cualquier defecto se resuelve en 48 horas sin coste</td>';
+    $o .= '<td width="50%" valign="top" style="padding:6px 0;">✓ <strong>Placa CSC</strong> y documentación técnica del contenedor</td></tr>';
+    $o .= '<tr><td width="50%" valign="top" style="padding:6px 10px 6px 0;">✓ <strong>Condición certificada</strong> Cargo Worthy o superior</td>';
+    $o .= '<td width="50%" valign="top" style="padding:6px 0;">✓ <strong>Servicio de recompra</strong> si deja de necesitarlo</td></tr>';
     $o .= '</table>';
-    $o .= '</div>';
+    $o .= '</td></tr>';
 
-    /* ── Bloque 5: Pago y antifraude ── */
-    $o .= '<div style="padding:24px 32px;border-bottom:1px solid #e5e7eb;background:#fffbeb;">';
-    $o .= '<p style="margin:0 0 10px;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#92400e;">&#128274; Seguridad en el pago</p>';
-    $o .= '<p style="margin:0 0 16px;font-size:13px;color:#374151;line-height:1.7;">'
-       .  'SILVERSEA Containers <strong>nunca solicita pagos por transferencia a cuentas de terceros</strong> ni por canales informales. '
-       .  'Toda comunicaci&#xF3;n oficial se realiza desde el dominio <strong>@silverseacontainers.com</strong>. '
-       .  'Ante cualquier duda sobre la autenticidad de un mensaje o instrucci&#xF3;n de pago, contacte directamente con su asesor.'
-       .  '</p>';
-    $o .= '<p style="margin:0;">';
-    $o .= '<a href="https://wa.me/34664803101"'
-       .  ' style="display:inline-block;background:#0F2557;color:#fff;font-size:13px;font-weight:600;padding:10px 22px;border-radius:6px;text-decoration:none;">'
-       .  'Verificar con Sergio por WhatsApp &#8594;'
-       .  '</a>';
-    $o .= '</p>';
+    /* ── Certificaciones ── */
+    $o .= '<tr><td style="padding:24px 28px 0 28px;">';
+    $o .= '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#F7F7F7;border:1px solid #E9E9E9;"><tr>';
+    $o .= '<td align="center" style="padding:16px 12px 6px 12px;font-family:Arial,Helvetica,sans-serif;font-size:10px;font-weight:700;letter-spacing:2px;color:#8A93A6;">EMPRESA CERTIFICADA Y VERIFICABLE</td>';
+    $o .= '</tr><tr><td align="center" style="padding:4px 12px 16px 12px;">';
+    $o .= '<div style="font-family:Arial,Helvetica,sans-serif;">';
+    $o .= '<span style="display:inline-block;border:1px solid #D9DDE5;background-color:#FFFFFF;padding:9px 12px;margin:4px 3px;font-size:11px;font-weight:700;color:#222D5A;">BUREAU VERITAS<br><span style="font-weight:400;color:#8A93A6;font-size:10px;">Certificación</span></span>';
+    $o .= '<span style="display:inline-block;border:1px solid #D9DDE5;background-color:#FFFFFF;padding:9px 12px;margin:4px 3px;font-size:11px;font-weight:700;color:#222D5A;">MIEMBRO BIC<br><span style="font-weight:400;color:#8A93A6;font-size:10px;">Bureau Int. Containers</span></span>';
+    $o .= '<a href="https://www.google.com/maps/search/?api=1&amp;query=SILVERSEA+CONTENEDORES" target="_blank" style="display:inline-block;text-decoration:none;margin: 4px 3px;border: 1px solid #D9DDE5;background-color: #FFFFFF;padding: 7px 12px;height: 28px;"><span style="display:inline-block;font-size:11px;font-weight:700;color:#222D5A;">★ 4,8 GOOGLE<br><span style="font-weight:400;color:#8A93A6;font-size:10px;">247 reseñas</span></span></a>';
     $o .= '</div>';
+    $o .= '</td></tr></table>';
+    $o .= '</td></tr>';
 
-    /* ── Bloque 6: Pie ── */
-    $o .= '<div style="padding:20px 32px;background:#f8fafc;">';
-    $o .= '<table width="100%" cellpadding="0" cellspacing="0" border="0"><tr>';
-    $o .= '<td style="vertical-align:top;width:50%;padding-right:16px;">';
-    $o .= '<p style="margin:0 0 4px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#9ca3af;">Barcelona</p>';
-    $o .= '<p style="margin:0;font-size:12px;color:#6b7280;line-height:1.65;">Avenida Diagonal 468, 5 C<br>CP 08006 Barcelona</p>';
-    $o .= '</td>';
-    $o .= '<td style="vertical-align:top;padding-left:16px;border-left:1px solid #e5e7eb;">';
-    $o .= '<p style="margin:0 0 4px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#9ca3af;">Madrid</p>';
-    $o .= '<p style="margin:0;font-size:12px;color:#6b7280;line-height:1.65;">Calle Anabel Segura 10, 2&#xBA; planta<br>Edificio Fiteni · 28108 Alcobendas</p>';
-    $o .= '</td>';
+    /* ── Bloque de confianza ── */
+    $o .= '<tr><td style="padding:24px 28px;">';
+    /* Barra de stats anterior (2016 / +80.000 / +3.000 / +120 / +50 / +24.520 Ton CO2).
+       Queda comentada por si se prefiere volver a esta versión:
+    $o .= '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#122A6B;"><tr>'
+       .  '<td style="text-align:center;padding:12px 5px;border-right:1px solid rgba(255,255,255,.2);"><strong style="display:block;font-size:15px;font-weight:700;color:#fff;">2016</strong><span style="font-size:10px;color:#93C5FD;text-transform:uppercase;">Fundación</span></td>'
+       .  '<td style="text-align:center;padding:12px 5px;border-right:1px solid rgba(255,255,255,.2);"><strong style="display:block;font-size:15px;font-weight:700;color:#fff;">+80.000</strong><span style="font-size:10px;color:#93C5FD;text-transform:uppercase;">Contenedores</span></td>'
+       .  '<td style="text-align:center;padding:12px 5px;border-right:1px solid rgba(255,255,255,.2);"><strong style="display:block;font-size:15px;font-weight:700;color:#fff;">+3.000</strong><span style="font-size:10px;color:#93C5FD;text-transform:uppercase;">Clientes</span></td>'
+       .  '<td style="text-align:center;padding:12px 5px;border-right:1px solid rgba(255,255,255,.2);"><strong style="display:block;font-size:15px;font-weight:700;color:#fff;">+120</strong><span style="font-size:10px;color:#93C5FD;text-transform:uppercase;">Depósitos</span></td>'
+       .  '<td style="text-align:center;padding:12px 5px;border-right:1px solid rgba(255,255,255,.2);"><strong style="display:block;font-size:15px;font-weight:700;color:#fff;">+50</strong><span style="font-size:10px;color:#93C5FD;text-transform:uppercase;">Puertos</span></td>'
+       .  '<td style="text-align:center;padding:12px 5px;"><strong style="display:block;font-size:15px;font-weight:700;color:#fff;">+24.520</strong><span style="font-size:10px;color:#93C5FD;text-transform:uppercase;">Ton. CO2 2024</span></td>'
+       .  '</tr></table>';
+    */
+    $o .= '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#222D5A;"><tr>';
+    $o .= '<td style="padding:22px 24px;">';
+    $o .= '<div style="font-family:Arial,Helvetica,sans-serif;font-size:11px;font-weight:700;letter-spacing:2px;color:#E6AB10;padding-bottom:8px;">COMPRE CON TRANQUILIDAD</div>';
+    $o .= '<div style="font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#C9D2E4;line-height:20px;">Desde 2016: más de 80.000 contenedores entregados a 3.000 clientes en 120 depósitos y 50 puertos.</div>';
+    $o .= '<div style="font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#C9D2E4;line-height:20px;padding-top:10px;">'
+       .  'Puede pagar por <strong style="color:#FFFFFF;">transferencia o tarjeta</strong>, o recoger su contenedor '
+       .  '<strong style="color:#FFFFFF;">gratis en nuestros depósitos</strong> de Barcelona, Madrid y Valencia. '
+       .  'Nunca solicitamos pagos a cuentas de terceros: compruebe siempre que el IBAN está a nombre de SILVERSEA S.L.U.'
+       .  '</div>';
+    $o .= '<table role="presentation" cellpadding="0" cellspacing="0" style="margin-top:16px;"><tr>';
+    $o .= '<td align="center" bgcolor="#E6AB10" style="border-radius:3px;"><a href="https://www.google.com/maps/search/?api=1&query=SILVERSEA+CONTENEDORES" style="display:inline-block;padding:11px 18px;font-family:Arial,Helvetica,sans-serif;font-size:13px;font-weight:700;color:#222D5A;text-decoration:none;">Ver reseñas en Google</a></td>';
+    $o .= '<td width="12"></td>';
+    $o .= '<td align="center" style="border:1px solid #5A6C99;border-radius:3px;"><a href="https://silverseacontainers.com/verificar-silversea-3-pasos.html" style="display:inline-block;padding:10px 18px;font-family:Arial,Helvetica,sans-serif;font-size:13px;font-weight:700;color:#FFFFFF;text-decoration:none;">Verificar SILVERSEA en 3 pasos</a></td>';
     $o .= '</tr></table>';
-    $o .= '<p style="margin:12px 0 0;font-size:12px;color:#9ca3af;">Tel: (+34) 935 958 800</p>';
-    $o .= '<p style="margin:12px 0 0;">';
-    $o .= '<a href="https://maps.google.com/?q=Avenida+Diagonal+468+Barcelona" style="font-size:12px;color:#185FA5;text-decoration:none;margin-right:14px;">&#128205; Maps Barcelona</a>';
-    $o .= '<a href="https://maps.google.com/?q=Calle+Anabel+Segura+10+Alcobendas+Madrid" style="font-size:12px;color:#185FA5;text-decoration:none;margin-right:14px;">&#128205; Maps Madrid</a>';
-    $o .= '<a href="https://www.linkedin.com/company/silversea-containers/" style="font-size:12px;color:#0077B5;text-decoration:none;">in LinkedIn</a>';
-    $o .= '</p>';
-    $o .= '<p style="margin:14px 0 0;font-size:11px;color:#d1d5db;border-top:1px solid #e5e7eb;padding-top:12px;">'
-       .  'Esta solicitud no constituye una reserva. '
-       .  '<a href="https://www.silverseacontainers.com/terminos" style="color:#9ca3af;">T&#xE9;rminos y Condiciones</a>'
-       .  '</p>';
-    $o .= '</div>';
+    $o .= '</td></tr></table>';
+    $o .= '</td></tr>';
 
-    $o .= '</div></body></html>';
+    /* ── Footer ── */
+    $o .= '<tr><td style="background-color:#EFEFEF;padding:22px 28px;">';
+    $o .= '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#5A6478;line-height:18px;"><tr>';
+    $o .= '<td width="50%" valign="top" style="padding-right:12px;"><strong style="color:#222D5A;">Barcelona</strong><br>Avenida Diagonal 468, 5C<br>08006 Barcelona</td>';
+    $o .= '<td width="50%" valign="top"><strong style="color:#222D5A;">Madrid</strong><br>Calle Anabel Segura 10, 2ª planta<br>Edificio Fiteni · 28108 Alcobendas</td>';
+    $o .= '</tr><tr><td colspan="2" style="padding-top:12px;">';
+    $o .= 'Tel: (+34) 935 958 800 · <a href="https://silverseacontainers.com/es/" style="color:#1676BB;">silverseacontainers.com</a> · <a href="https://www.linkedin.com/company/silversea-containers/" style="color:#1676BB;">LinkedIn</a>';
+    $o .= '</td></tr><tr><td colspan="2" style="padding-top:12px;border-top:1px solid #DDDDDD;font-size:11px;color:#8A93A6;">';
+    $o .= '<span style="display:block;padding-top:8px;">SILVERSEA S.L.U. · CIF B67110601 · Inscrita en el Registro Mercantil de Barcelona. '
+       .  'Este presupuesto no constituye una reserva. <a href="https://www.silverseacontainers.com/terminos" style="color:#8A93A6;">Términos y Condiciones</a></span>';
+    $o .= '</td></tr></table>';
+    $o .= '</td></tr>';
+
+    $o .= '</table></td></tr></table></body></html>';
     return $o;
 }
 
@@ -1285,8 +1486,8 @@ function silversea_send_admin_email( $quote_id, $data ) {
     $email_comercial = get_option('silversea_sales_email', '');
     $email_debug     = get_option('silversea_admin_email', get_option('admin_email'));
 
-    $subject_sales  = sprintf('[Silversea Ventas] Nueva cotización #%d – %s', $quote_id, $data['name']);
-    $subject_client = sprintf('[SILVERSEA Containers] Su solicitud de cotización #%d', $quote_id);
+    $subject_sales  = sprintf('[Silversea Ventas] Nuevo presupuesto #%d – %s', $quote_id, $data['name']);
+    $subject_client = sprintf('[SILVERSEA Containers] Su solicitud de presupuesto #%d', $quote_id);
 
     $headers_base = [
         'Content-Type: text/html; charset=UTF-8',
@@ -1320,7 +1521,7 @@ function silversea_send_admin_email( $quote_id, $data ) {
         wp_mail( $to_sales, $subject_sales, $body_sales, $headers_base );
     }
     /* Si no hay email configurado: el body queda guardado en el CPT
-       para enviarlo manualmente desde el panel de cotizaciones. */
+       para enviarlo manualmente desde el panel de presupuestos. */
 
     /* ── Email cliente (opcional) — solo si también hay email de ventas configurado ── */
     if ( $send_client && $data['email'] && $to_sales ) {
@@ -1347,7 +1548,7 @@ function silversea_send_admin_email( $quote_id, $data ) {
 
 
 /* ══════════════════════════════════════════════════════════════
-   6.  ENCOLAR CSS de la página de cotización
+   6.  ENCOLAR CSS de la página de presupuesto
 ══════════════════════════════════════════════════════════════ */
 
 add_action( 'wp_enqueue_scripts', 'silversea_enqueue_raq_styles' );
@@ -1364,7 +1565,7 @@ function silversea_enqueue_raq_styles() {
 
 
 /* ══════════════════════════════════════════════════════════════
-   6.  BLOQUEAR "AÑADIR A SELECCIÓN" SI NO SE HA COTIZADO
+   6.  BLOQUEAR "AÑADIR A SELECCIÓN" SI NO SE HA PRESUPUESTADO
 ══════════════════════════════════════════════════════════════ */
 
 add_filter( 'ywraq_ajax_add_item_is_valid', 'silversea_require_quote_before_add', 5, 2 );
@@ -1382,7 +1583,7 @@ function silversea_require_quote_before_add( $is_valid, $product_id ) {
         exit;
     }
 
-    /* Guardar el último product_id agregado con cotización */
+    /* Guardar el último product_id agregado con presupuesto */
     WC()->session->set( 'silversea_last_added_product', (int)$product_id );
 
     return $is_valid;
