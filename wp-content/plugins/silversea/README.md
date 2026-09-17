@@ -311,6 +311,10 @@ Post type privado `silversea_quote`. Cada cotización enviada genera un registro
 | `_sq_client_type` | `particular` \| `empresa` |
 | `_sq_city` | Ciudad del cliente |
 | `_sq_postal` | CP del cliente |
+| `_sq_country` | País del cliente (value en inglés, picklist Salesforce) |
+| `_sq_form_lang` | Idioma del formulario (`ES`\|`EN`\|`PT`) |
+| `_sq_utm_source` / `_sq_utm_medium` / `_sq_utm_campaign` / `_sq_utm_term` / `_sq_utm_content` | Atribución de campaña capturada de la URL de entrada |
+| `_sq_gclid` | Google Click ID (hoy siempre vacío — ver nota en Integración Salesforce) |
 | `_sq_message` | Mensaje libre |
 | `_sq_products` | JSON: `[{name, product_id, condition, qty, addons, color, price, city}]` |
 | `_sq_shipping_method` | `delivery` \| `pickup` |
@@ -368,6 +372,11 @@ Se ejecuta automáticamente al procesar cada cotización (`ywraq_process`), desp
 | `first_name` / `last_name` | Del formulario. Para empresas: `last_name = nombre de empresa` |
 | `company` | Solo si el cliente es empresa |
 | `email`, `phone`, `city`, `zip` | Del formulario |
+| `country` / `00NUm00000G445R` — País | Value del `<select>` de país del formulario (value en inglés, coincide con el picklist de Salesforce). Se manda dos veces: al campo estándar `country` y al picklist custom, igual que hace el formulario de contacto de Elementor |
+| `00NUm00000WqX8j` — Tipo de cliente | `Empresa` \| `Particular`, según `rqa_client_type` |
+| `00NUm00000WuUnO` — Idioma | `ES` \| `EN` \| `PT`, tomado de `document.documentElement.lang`. Hoy siempre `ES` (el sitio no tiene versiones EN/PT) |
+| `00NUm00000WuUnT/S/Q/U/R` — UTM Source/Medium/Campaign/Term/Content | Capturados de la URL de entrada y persistidos en `sessionStorage` hasta que el visitante completa el cotizador |
+| `00NUm00000WuUnP` — gclid | **Siempre vacío por ahora.** El template de Salesforce exige consentimiento de marketing antes de capturar gclid y el sitio no tiene ningún gestor de consentimiento de cookies instalado. El hook `hasMarketingConsent()` en `request-quote-form.php` queda listo para activarlo el día que exista un CMP |
 | `description` | Detalle completo del carrito (ver formato abajo) |
 
 ### Lógica ContainerType / Quantity

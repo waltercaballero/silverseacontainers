@@ -351,6 +351,7 @@ function silversea_load_quote_data( $quote_id ) {
         'type'        => get_post_meta( $quote_id, '_sq_client_type', true ),
         'city'        => get_post_meta( $quote_id, '_sq_city',        true ),
         'postal'      => get_post_meta( $quote_id, '_sq_postal',      true ),
+        'country'     => get_post_meta( $quote_id, '_sq_country',     true ),
         'message'     => get_post_meta( $quote_id, '_sq_message',     true ),
         'method'      => $method,
         'origin'      => $origin,
@@ -433,6 +434,7 @@ function silversea_quote_metabox( $post ) {
     $type      = get_post_meta($id, '_sq_client_type',      true);
     $city      = get_post_meta($id, '_sq_city',             true);
     $postal    = get_post_meta($id, '_sq_postal',           true);
+    $country   = get_post_meta($id, '_sq_country',          true);
     $message   = get_post_meta($id, '_sq_message',          true);
     $method    = get_post_meta($id, '_sq_shipping_method',  true);
     $origin    = get_post_meta($id, '_sq_shipping_origin',  true);
@@ -456,6 +458,7 @@ function silversea_quote_metabox( $post ) {
         'Email'    => $email ? '<a href="mailto:'.esc_attr($email).'">'.esc_html($email).'</a>' : '',
         'Teléfono' => $phone,
         'Ciudad'   => $city . ( $postal ? " ($postal)" : '' ),
+        'País'     => $country,
         'Mensaje'  => $message,
     ];
     echo '<table style="width:100%;border-collapse:collapse;">';
@@ -591,6 +594,23 @@ function silversea_get_shipping_post_data() {
             'message'   => sanitize_textarea_field( $_POST['rqa_message']   ?? '' ),
         ];
 
+        /* País — value cerrado que debe llegar tal cual del <select> del formulario
+           (coincide letra por letra con el picklist 00NUm00000G445R de Salesforce).
+           Se valida contra la misma whitelist que usa el propio <select>, para no
+           reenviar a Salesforce un valor manipulado que no exista en el picklist. */
+        $posted_country   = sanitize_text_field( wp_unslash( $_POST['rqa_country_std'] ?? $_POST['rqa_country'] ?? '' ) );
+        $data['country']  = in_array( $posted_country, silversea_sf_country_values(), true ) ? $posted_country : '';
+
+        /* Idioma del formulario y atribución de campaña (UTM/gclid).
+           Van a Salesforce como campos opcionales; no se usan en ninguna lógica interna. */
+        $data['form_lang']    = sanitize_text_field( $_POST['rqa_form_language'] ?? 'ES' );
+        $data['utm_source']   = sanitize_text_field( $_POST['rqa_utm_source']    ?? '' );
+        $data['utm_medium']   = sanitize_text_field( $_POST['rqa_utm_medium']    ?? '' );
+        $data['utm_campaign'] = sanitize_text_field( $_POST['rqa_utm_campaign']  ?? '' );
+        $data['utm_term']     = sanitize_text_field( $_POST['rqa_utm_term']      ?? '' );
+        $data['utm_content']  = sanitize_text_field( $_POST['rqa_utm_content']   ?? '' );
+        $data['gclid']        = sanitize_text_field( $_POST['rqa_gclid']         ?? '' );
+
         /* Leer datos de envío del POST */
         $method    = sanitize_key( $_POST['rqa_shipping_method']      ?? '' );
         $origin    = sanitize_key( $_POST['rqa_shipping_origin']      ?? '' );
@@ -718,6 +738,14 @@ function silversea_process_and_save( $args ) {
             '_sq_client_type'         => $d['type'],
             '_sq_city'                => $d['city'],
             '_sq_postal'              => $d['postal'],
+            '_sq_country'             => $d['country']    ?? '',
+            '_sq_form_lang'           => $d['form_lang']   ?? 'ES',
+            '_sq_utm_source'          => $d['utm_source']  ?? '',
+            '_sq_utm_medium'          => $d['utm_medium']  ?? '',
+            '_sq_utm_campaign'        => $d['utm_campaign']?? '',
+            '_sq_utm_term'            => $d['utm_term']    ?? '',
+            '_sq_utm_content'         => $d['utm_content'] ?? '',
+            '_sq_gclid'               => $d['gclid']       ?? '',
             '_sq_message'             => $d['message'],
             '_sq_shipping_method'     => $d['method'],
             '_sq_shipping_origin'     => $d['origin'],

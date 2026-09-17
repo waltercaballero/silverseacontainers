@@ -37,6 +37,54 @@ function silversea_sf_container_types() {
 }
 
 /* ══════════════════════════════════════════════════════════════
+   PICKLIST — valores válidos de País en Salesforce (00NUm00000G445R)
+   Debe coincidir letra por letra con las <option value="..."> del
+   <select name="rqa_country"> en request-quote-form.php. Se usa solo
+   para validar lo que llega por POST antes de reenviarlo a Salesforce.
+══════════════════════════════════════════════════════════════ */
+
+function silversea_sf_country_values() {
+    return [
+        'Spain', 'Portugal', 'France', 'Italy', 'Germany', 'United Kingdom',
+        'Mexico', 'Colombia', 'Argentina', 'Brazil', 'Chile', 'Uruguay', 'Peru',
+        'United States', 'Afghanistan', 'Albania', 'Algeria', 'Andorra', 'Angola',
+        'Antigua and Barbuda', 'Armenia', 'Australia', 'Austria', 'Azerbaijan',
+        'Bahamas', 'Bahrain', 'Bangladesh', 'Barbados', 'Belarus', 'Belgium',
+        'Belize', 'Benin', 'Bhutan', 'Bolivia', 'Bosnia and Herzegovina',
+        'Botswana', 'Brunei', 'Bulgaria', 'Burkina Faso', 'Burundi', 'Cabo Verde',
+        'Cambodia', 'Cameroon', 'Canada', 'Central African Republic', 'Chad',
+        'China', 'Comoros', 'Congo (Congo-Brazzaville)', 'Costa Rica', 'Croatia',
+        'Cuba', 'Cyprus', 'Czech Republic', 'Democratic Republic of the Congo',
+        'Denmark', 'Djibouti', 'Dominica', 'Dominican Republic', 'Ecuador',
+        'Egypt', 'El Salvador', 'Equatorial Guinea', 'Eritrea', 'Estonia',
+        'Eswatini', 'Ethiopia', 'Fiji', 'Finland', 'Gabon', 'Gambia', 'Georgia',
+        'Ghana', 'Greece', 'Grenada', 'Guatemala', 'Guinea', 'Guinea-Bissau',
+        'Guyana', 'Haiti', 'Honduras', 'Hungary', 'Iceland', 'India', 'Indonesia',
+        'Iran', 'Iraq', 'Ireland', 'Israel', 'Jamaica', 'Japan', 'Jordan',
+        'Kazakhstan', 'Kenya', 'Kiribati', 'Kuwait', 'Kyrgyzstan', 'Laos',
+        'Latvia', 'Lebanon', 'Lesotho', 'Liberia', 'Libya', 'Liechtenstein',
+        'Lithuania', 'Luxembourg', 'Madagascar', 'Malawi', 'Malaysia', 'Maldives',
+        'Mali', 'Malta', 'Marshall Islands', 'Mauritania', 'Mauritius',
+        'Micronesia', 'Moldova', 'Monaco', 'Mongolia', 'Montenegro', 'Morocco',
+        'Mozambique', 'Myanmar (Burma)', 'Namibia', 'Nauru', 'Nepal',
+        'Netherlands', 'New Zealand', 'Nicaragua', 'Niger', 'Nigeria',
+        'North Korea', 'North Macedonia', 'Norway', 'Oman', 'Pakistan', 'Palau',
+        'Palestine State', 'Panama', 'Papua New Guinea', 'Paraguay',
+        'Philippines', 'Poland', 'Qatar', 'Romania', 'Russia', 'Rwanda',
+        'Saint Kitts and Nevis', 'Saint Lucia', 'Saint Vincent and the Grenadines',
+        'Samoa', 'San Marino', 'Sao Tome and Principe', 'Saudi Arabia', 'Senegal',
+        'Serbia', 'Seychelles', 'Sierra Leone', 'Singapore', 'Slovakia',
+        'Slovenia', 'Solomon Islands', 'Somalia', 'South Africa', 'South Korea',
+        'South Sudan', 'Sri Lanka', 'Sudan', 'Suriname', 'Sweden', 'Switzerland',
+        'Syria', 'Tajikistan', 'Tanzania', 'Thailand', 'Timor-Leste', 'Togo',
+        'Tonga', 'Trinidad and Tobago', 'Tunisia', 'Turkey', 'Turkmenistan',
+        'Tuvalu', 'Uganda', 'Ukraine', 'United Arab Emirates', 'Uzbekistan',
+        'Vanuatu', 'Vatican City', 'Venezuela', 'Vietnam', 'Yemen', 'Zambia',
+        'Zimbabwe',
+    ];
+}
+
+/* ══════════════════════════════════════════════════════════════
    HELPERS — obtener el ContainerType mapeado de un producto.
    El meta 'silversea_sf_container_type' se guarda en el producto padre.
 ══════════════════════════════════════════════════════════════ */
@@ -319,10 +367,20 @@ function silversea_sf_metabox( $post ) {
             'phone'           => 'Teléfono',
             'city'            => 'Ciudad',
             'zip'             => 'CP',
+            'country'         => 'País (estándar)',
+            '00NUm00000G445R' => 'País',
+            '00NUm00000WqX8j' => 'Tipo de cliente',
             '00N8a00000FXdRZ' => 'ContainerType',
             '00N8a00000FXdRo' => 'Quantity',
             '00N8a00000FXdRt' => 'Modality',
             '00N8a00000FXdRj' => 'Market',
+            '00NUm00000WuUnO' => 'Idioma',
+            '00NUm00000WuUnT' => 'UTM Source',
+            '00NUm00000WuUnS' => 'UTM Medium',
+            '00NUm00000WuUnQ' => 'UTM Campaign',
+            '00NUm00000WuUnU' => 'UTM Term',
+            '00NUm00000WuUnR' => 'UTM Content',
+            '00NUm00000WuUnP' => 'gclid',
             'lead_source'     => 'Lead Source',
             'description'     => 'Description',
         ];
@@ -391,6 +449,14 @@ function silversea_sf_build_payload_from_quote( $quote_id ) {
     $city         = get_post_meta( $quote_id, '_sq_city',        true );
     $postal       = get_post_meta( $quote_id, '_sq_postal',      true );
     $message      = get_post_meta( $quote_id, '_sq_message',     true );
+    $country      = get_post_meta( $quote_id, '_sq_country',     true );
+    $form_lang    = get_post_meta( $quote_id, '_sq_form_lang',   true ) ?: 'ES';
+    $utm_source   = get_post_meta( $quote_id, '_sq_utm_source',  true );
+    $utm_medium   = get_post_meta( $quote_id, '_sq_utm_medium',  true );
+    $utm_campaign = get_post_meta( $quote_id, '_sq_utm_campaign',true );
+    $utm_term     = get_post_meta( $quote_id, '_sq_utm_term',    true );
+    $utm_content  = get_post_meta( $quote_id, '_sq_utm_content', true );
+    $gclid        = get_post_meta( $quote_id, '_sq_gclid',       true );
     $products_raw = json_decode( get_post_meta( $quote_id, '_sq_products', true ) ?: '[]', true );
 
     if ( empty( $products_raw ) ) return null;
@@ -436,6 +502,16 @@ function silversea_sf_build_payload_from_quote( $quote_id ) {
         'company'         => $company,
         'city'            => $city,
         'zip'             => $postal,
+        'country'         => $country,
+        '00NUm00000G445R' => $country,
+        '00NUm00000WqX8j' => $is_empresa ? 'Empresa' : 'Particular',
+        '00NUm00000WuUnO' => $form_lang,
+        '00NUm00000WuUnT' => $utm_source,
+        '00NUm00000WuUnS' => $utm_medium,
+        '00NUm00000WuUnQ' => $utm_campaign,
+        '00NUm00000WuUnU' => $utm_term,
+        '00NUm00000WuUnR' => $utm_content,
+        '00NUm00000WuUnP' => $gclid,
         'description'     => $description,
     ];
 }
@@ -584,6 +660,16 @@ function silversea_send_to_salesforce( $d, $products, $quote_id = 0 ) {
         'company'         => $company,
         'city'            => $d['city']   ?? '',
         'zip'             => $d['postal'] ?? '',
+        'country'         => $d['country'] ?? '',
+        '00NUm00000G445R' => $d['country'] ?? '',
+        '00NUm00000WqX8j' => $is_empresa ? 'Empresa' : 'Particular',
+        '00NUm00000WuUnO' => $d['form_lang']    ?? 'ES',
+        '00NUm00000WuUnT' => $d['utm_source']   ?? '',
+        '00NUm00000WuUnS' => $d['utm_medium']   ?? '',
+        '00NUm00000WuUnQ' => $d['utm_campaign'] ?? '',
+        '00NUm00000WuUnU' => $d['utm_term']     ?? '',
+        '00NUm00000WuUnR' => $d['utm_content']  ?? '',
+        '00NUm00000WuUnP' => $d['gclid']        ?? '',
         'description'     => $description,
         '00NUm00000UecA9' => $quote_id ? (string) $quote_id : '',
         '00NUm00000Ue4V3' => 'SILVERSEA',
