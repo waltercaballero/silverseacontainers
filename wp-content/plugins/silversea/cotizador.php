@@ -87,7 +87,7 @@ function silversea_render_product_order_page() {
     ?>
     <div class="wrap" style="max-width:860px;">
       <h1 style="display:flex;align-items:center;gap:10px;">
-        ↕ Ordenar Productos
+        Ordenar Productos
         <span style="font-size:13px;font-weight:400;color:#6b7280;">
           — el orden se aplica cuando Elementor usa <em>Orden del menú</em>
         </span>
@@ -300,7 +300,7 @@ function silversea_render_product_prices_page() {
     };
     ?>
     <div class="wrap" style="max-width:980px;">
-      <h1>€ Editar Precios</h1>
+      <h1>Editar Precios</h1>
 
       <!-- Filtros -->
       <form method="get" style="display:flex;gap:10px;align-items:center;margin:16px 0;">

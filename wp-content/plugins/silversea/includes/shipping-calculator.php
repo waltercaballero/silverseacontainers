@@ -16,7 +16,7 @@ if ( ! defined( 'SILVERSEA_PLUGIN_DIR' ) )
 /* Versión única para cache-busting de todos los assets (JS/CSS).
    Subir este número cuando se modifique cualquier archivo de assets. */
 if ( ! defined( 'SILVERSEA_VERSION' ) )
-    define( 'SILVERSEA_VERSION', '2.3.1' );
+    define( 'SILVERSEA_VERSION', '2.3.3' );
 
 require_once __DIR__ . '/texts.php';
 
@@ -107,6 +107,15 @@ function silversea_shipping_admin_menu() {
         'manage_woocommerce',
         'silversea-city-prices',
         'silversea_render_city_prices_page'
+    );
+    /* Ver todas las tarifas cargadas (auditoría de importación) */
+    add_submenu_page(
+        'silversea-cotizador',
+        'Ver Tarifas',
+        'Ver Tarifas',
+        'manage_woocommerce',
+        'silversea-tarifas-browser',
+        'silversea_render_tarifas_browser_page'
     );
 }
 
@@ -414,7 +423,11 @@ function silversea_shipping_admin_page() {
         <input type="submit" class="button button-secondary" value="Vaciar ciudad" />
       </form>
       <hr style="margin:20px 0;">
-      <h3 style="margin:0 0 8px;">Vista previa</h3>
+      <h3 style="margin:0 0 8px;display:flex;align-items:center;justify-content:space-between;gap:8px;">
+        Vista previa
+        <a href="<?php echo esc_url( admin_url('admin.php?page=silversea-tarifas-browser&origin=' . $ciudad_preview) ); ?>" style="font-size:12px;font-weight:400;">Ver todas las tarifas de esta ciudad →</a>
+      </h3>
+      <div id="sc-preview-box" data-origin="<?php echo esc_attr($ciudad_preview); ?>">
       <form method="get" style="margin-bottom:8px;">
         <input type="hidden" name="page" value="silversea-cotizador">
         <select name="preview" onchange="this.form.submit()" style="min-width:160px;">
@@ -423,6 +436,13 @@ function silversea_shipping_admin_page() {
           <?php endforeach; ?>
         </select>
       </form>
+      <div style="position:relative;max-width:260px;margin-bottom:10px;">
+        <input type="text" id="sc-preview-cp-input" placeholder="Buscar CP en esta ciudad…" autocomplete="off"
+               style="width:100%;padding:6px 8px;border:1px solid #d1d5db;border-radius:4px;font-size:13px;box-sizing:border-box;">
+        <div id="sc-preview-cp-suggestions"
+             style="display:none;position:absolute;left:0;right:0;top:100%;background:#fff;border:1px solid #d1d5db;border-top:none;max-height:220px;overflow-y:auto;z-index:10;box-shadow:0 4px 8px rgba(0,0,0,.08);"></div>
+      </div>
+      <div id="sc-preview-cp-result" style="margin-bottom:14px;"></div>
       <?php if($preview_rows): ?>
         <table style="width:100%;font-size:12px;border-collapse:collapse;">
           <thead><tr style="background:#f5f5f5;">
@@ -450,6 +470,7 @@ function silversea_shipping_admin_page() {
       <?php else: ?>
         <p style="color:#999;font-size:13px;">Sin datos para <?php echo silversea_origin_label($ciudad_preview); ?>.</p>
       <?php endif; ?>
+      </div>
     </div>
     </div>
 
@@ -503,6 +524,408 @@ function silversea_shipping_admin_page() {
     </div>
     </div>
     <?php
+}
+
+/* ══ 4b. VISTA PREVIA — BÚSQUEDA DE CP CON AUTOCOMPLETE (admin) ══ */
+
+add_action( 'admin_enqueue_scripts', function ( $hook ) {
+    if ( $hook !== 'toplevel_page_silversea-cotizador' ) return;
+    wp_enqueue_script(
+        'silversea-cotizador-preview',
+        SILVERSEA_PLUGIN_URL . 'assets/js/cotizador-admin-preview.js',
+        [], SILVERSEA_VERSION, true
+    );
+    $city_labels = [];
+    foreach ( silversea_get_city_keys('delivery') as $key ) $city_labels[$key] = silversea_origin_label($key);
+
+    wp_localize_script( 'silversea-cotizador-preview', 'silvSeaPreview', [
+        'ajaxUrl'    => admin_url( 'admin-ajax.php' ),
+        'nonce'      => wp_create_nonce( 'silversea_preview_cp' ),
+        'cityLabels' => $city_labels,
+    ] );
+} );
+
+add_action( 'wp_ajax_silversea_preview_cp_search', 'silversea_preview_cp_search_ajax' );
+
+function silversea_preview_cp_search_ajax() {
+    if ( ! current_user_can('manage_woocommerce') ) wp_send_json_error( ['message' => 'No autorizado.'], 403 );
+    if ( ! check_ajax_referer( 'silversea_preview_cp', 'nonce', false ) ) wp_send_json_error( ['message' => 'Sesión inválida.'], 403 );
+
+    $origin = sanitize_key( $_POST['origin'] ?? '' );
+    $term   = preg_replace( '/\D/', '', $_POST['term'] ?? '' );
+
+    if ( ! in_array( $origin, silversea_get_city_keys('delivery'), true ) )
+        wp_send_json_error( ['message' => 'Ciudad inválida.'] );
+
+    if ( strlen($term) < 2 ) wp_send_json_success( [] );
+
+    global $wpdb;
+    $table    = $wpdb->prefix . 'silversea_tarifas';
+    $like     = $wpdb->esc_like($term) . '%';
+    $like_alt = $wpdb->esc_like( ltrim($term, '0') ) . '%';
+    $rows = $wpdb->get_results( $wpdb->prepare(
+        "SELECT cp_destino, municipio_destino, km, precio_sin_descarga, precio_con_desc_20, precio_con_desc_40
+         FROM {$table}
+         WHERE ciudad_origen=%s AND (cp_destino LIKE %s OR cp_destino LIKE %s)
+         ORDER BY cp_destino LIMIT 10",
+        $origin, $like, $like_alt
+    ), ARRAY_A );
+
+    $results = array_map( function ( $r ) {
+        $r['sin_tarifa_descarga'] = ( (float)$r['precio_con_desc_20'] === 0.0
+            && (float)$r['precio_con_desc_40'] === 0.0
+            && (float)$r['precio_sin_descarga'] > 0.0 );
+        return $r;
+    }, $rows ?: [] );
+
+    wp_send_json_success( $results );
+}
+
+/* ══ 4c. PÁGINA — VER TODAS LAS TARIFAS (auditoría de importación) ══ */
+
+/**
+ * Fragmento SQL (sin parámetros de usuario) que detecta filas con datos
+ * probablemente mal importados desde Excel/CSV/JSON.
+ */
+function silversea_tarifa_problemas_sql() {
+    return "( LENGTH(cp_destino) <> 5
+              OR cp_destino REGEXP '[^0-9]'
+              OR municipio_destino = ''
+              OR km = 0
+              OR (precio_sin_descarga = 0 AND precio_con_desc_20 = 0 AND precio_con_desc_40 = 0) )";
+}
+
+/**
+ * Devuelve la lista de problemas detectados en una fila (para resaltarla
+ * y mostrar el motivo). Array vacío si la fila está OK.
+ */
+function silversea_tarifa_row_problemas( $r ) {
+    $problemas = [];
+    if ( strlen($r['cp_destino']) !== 5 )                      $problemas[] = 'CP sin 5 dígitos';
+    if ( ! preg_match('/^[0-9]+$/', (string) $r['cp_destino']) ) $problemas[] = 'CP con caracteres no numéricos';
+    if ( trim((string) $r['municipio_destino']) === '' )       $problemas[] = 'Municipio vacío';
+    if ( (int) $r['km'] === 0 )                                $problemas[] = 'Km en 0';
+    if ( (float)$r['precio_sin_descarga'] === 0.0
+      && (float)$r['precio_con_desc_20']  === 0.0
+      && (float)$r['precio_con_desc_40']  === 0.0 )            $problemas[] = 'Los 3 precios en 0';
+    return $problemas;
+}
+
+function silversea_render_tarifas_browser_page() {
+    global $wpdb;
+    $table = $wpdb->prefix . 'silversea_tarifas';
+
+    $cities = silversea_get_cities_for_mode('delivery');
+    $origin = sanitize_key( $_GET['origin'] ?? '' );
+    if ( ! in_array( $origin, wp_list_pluck($cities, 'key'), true ) )
+        $origin = $cities ? $cities[0]['key'] : '';
+
+    $search        = sanitize_text_field( $_GET['s'] ?? '' );
+    $only_problems = ! empty($_GET['only_problems']);
+    $per_page      = (int) ( $_GET['per_page'] ?? 50 );
+    if ( ! in_array( $per_page, [50, 100, 200], true ) ) $per_page = 50;
+    $paged         = max( 1, (int)($_GET['paged'] ?? 1) );
+
+    $where = $wpdb->prepare( "ciudad_origen = %s", $origin );
+    if ( $search ) {
+        $like   = '%' . $wpdb->esc_like($search) . '%';
+        $where .= $wpdb->prepare( " AND (cp_destino LIKE %s OR municipio_destino LIKE %s)", $like, $like );
+    }
+    if ( $only_problems ) $where .= " AND " . silversea_tarifa_problemas_sql();
+
+    $total_filtered = $origin ? (int) $wpdb->get_var( "SELECT COUNT(*) FROM {$table} WHERE {$where}" ) : 0;
+    $total_city     = $origin ? (int) $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM {$table} WHERE ciudad_origen=%s", $origin ) ) : 0;
+
+    $total_pages = max( 1, (int) ceil( $total_filtered / $per_page ) );
+    $paged       = min( $paged, $total_pages );
+    $offset      = ( $paged - 1 ) * $per_page;
+
+    $rows = $origin ? $wpdb->get_results(
+        "SELECT * FROM {$table} WHERE {$where} ORDER BY cp_destino ASC LIMIT {$per_page} OFFSET {$offset}",
+        ARRAY_A
+    ) : [];
+
+    $base_args = array_filter( [
+        'page'          => 'silversea-tarifas-browser',
+        'origin'        => $origin,
+        's'             => $search,
+        'only_problems' => $only_problems ? '1' : '',
+        'per_page'      => $per_page,
+    ] );
+    ?>
+    <div class="wrap">
+      <h1 style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;">
+        Ver Tarifas
+        <?php if ( $origin ) : ?>
+          <a href="<?php echo esc_url( wp_nonce_url( admin_url('admin-post.php?' . http_build_query( array_merge($base_args, ['action' => 'silversea_export_tarifas']) )), 'silversea_export_tarifas' ) ); ?>"
+             class="button">⬇ Exportar CSV</a>
+        <?php endif; ?>
+      </h1>
+
+      <form method="get" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:16px 0;">
+        <input type="hidden" name="page" value="silversea-tarifas-browser">
+        <select name="origin" onchange="this.form.submit()" style="height:34px;">
+          <?php foreach ( $cities as $city ) : ?>
+            <option value="<?php echo esc_attr($city['key']); ?>" <?php selected($origin, $city['key']); ?>><?php echo esc_html($city['name']); ?></option>
+          <?php endforeach; ?>
+        </select>
+        <input type="search" name="s" value="<?php echo esc_attr($search); ?>" placeholder="Buscar CP o municipio…" style="width:220px;height:34px;padding:0 8px;">
+        <label style="display:flex;align-items:center;gap:6px;font-size:13px;">
+          <input type="checkbox" name="only_problems" value="1" <?php checked($only_problems); ?>>
+          Solo mostrar con problemas
+        </label>
+        <select name="per_page" onchange="this.form.submit()" style="height:34px;">
+          <?php foreach ( [50, 100, 200] as $pp ) : ?>
+            <option value="<?php echo $pp; ?>" <?php selected($per_page, $pp); ?>><?php echo $pp; ?> por página</option>
+          <?php endforeach; ?>
+        </select>
+        <button type="submit" class="button">Filtrar</button>
+        <?php if ( $search || $only_problems ) : ?>
+          <a href="?page=silversea-tarifas-browser&origin=<?php echo esc_attr($origin); ?>" class="button">✕ Limpiar</a>
+        <?php endif; ?>
+      </form>
+
+      <p style="color:#666;font-size:13px;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">
+        <span>
+          <?php echo number_format($total_filtered); ?> tarifa(s) <?php echo ($search || $only_problems) ? 'encontrada(s) de ' . number_format($total_city) . ' totales' : ''; ?>
+          en <strong><?php echo esc_html( silversea_origin_label($origin) ); ?></strong>.
+        </span>
+        <?php if ( $origin ) : ?>
+          <button type="button" id="sc-add-tarifa-btn" class="button">+ Agregar tarifa</button>
+        <?php endif; ?>
+      </p>
+
+      <table id="sc-tarifas-table" data-origin="<?php echo esc_attr($origin); ?>" style="width:100%;font-size:13px;border-collapse:collapse;background:#fff;">
+        <thead><tr style="background:#f5f5f5;">
+          <th style="padding:6px 10px;text-align:left;border:1px solid #ddd;">CP</th>
+          <th style="padding:6px 10px;text-align:left;border:1px solid #ddd;">Municipio</th>
+          <th style="padding:6px 10px;text-align:right;border:1px solid #ddd;">Km</th>
+          <th style="padding:6px 10px;text-align:right;border:1px solid #ddd;">Sin desc.</th>
+          <th style="padding:6px 10px;text-align:right;border:1px solid #ddd;">20'</th>
+          <th style="padding:6px 10px;text-align:right;border:1px solid #ddd;">40'</th>
+          <th style="padding:6px 10px;text-align:left;border:1px solid #ddd;">Problemas</th>
+          <th style="padding:6px 10px;text-align:left;border:1px solid #ddd;">Acciones</th>
+        </tr></thead>
+        <tbody>
+        <?php if ( ! $rows ) : ?>
+          <tr><td colspan="8" style="padding:16px;text-align:center;color:#999;border:1px solid #eee;">Sin resultados.</td></tr>
+        <?php else : foreach ( $rows as $r ) :
+          $problemas  = silversea_tarifa_row_problemas($r);
+          $row_style  = $problemas ? 'background:#fef2f2;' : '';
+          $row_data   = wp_json_encode( array_merge( $r, [ 'problemas' => $problemas ] ) );
+          $delete_url = wp_nonce_url(
+              admin_url( 'admin-post.php?action=silversea_delete_tarifa&id=' . (int)$r['id'] . '&_wp_referer=' . urlencode( $_SERVER['REQUEST_URI'] ?? '' ) ),
+              'silversea_delete_tarifa_' . (int)$r['id']
+          );
+        ?>
+          <tr style="<?php echo $row_style; ?>" data-row='<?php echo esc_attr($row_data); ?>'>
+            <td style="padding:5px 10px;border:1px solid #eee;"><?php echo esc_html($r['cp_destino']); ?></td>
+            <td style="padding:5px 10px;border:1px solid #eee;"><?php echo esc_html($r['municipio_destino']); ?></td>
+            <td style="padding:5px 10px;border:1px solid #eee;text-align:right;"><?php echo esc_html($r['km']); ?></td>
+            <td style="padding:5px 10px;border:1px solid #eee;text-align:right;">€<?php echo number_format((float)$r['precio_sin_descarga'],2,',','.'); ?></td>
+            <td style="padding:5px 10px;border:1px solid #eee;text-align:right;">€<?php echo number_format((float)$r['precio_con_desc_20'],2,',','.'); ?></td>
+            <td style="padding:5px 10px;border:1px solid #eee;text-align:right;">€<?php echo number_format((float)$r['precio_con_desc_40'],2,',','.'); ?></td>
+            <td style="padding:5px 10px;border:1px solid #eee;color:#b91c1c;font-size:12px;"><?php echo esc_html( implode(', ', $problemas) ); ?></td>
+            <td style="padding:5px 10px;border:1px solid #eee;white-space:nowrap;">
+              <button type="button" class="button button-small sc-edit-btn">Editar</button>
+              <a href="<?php echo esc_url($delete_url); ?>" class="button button-small" style="color:#b91c1c;" onclick="return confirm('¿Eliminar la tarifa del CP <?php echo esc_js($r['cp_destino']); ?>? Esta acción no se puede deshacer.')">Eliminar</a>
+            </td>
+          </tr>
+        <?php endforeach; endif; ?>
+        </tbody>
+      </table>
+
+      <?php if ( $total_pages > 1 ) : ?>
+        <div style="margin-top:16px;">
+          <?php
+            echo paginate_links( [
+                'base'      => add_query_arg( array_merge($base_args, ['paged' => '%#%']) ),
+                'format'    => '',
+                'current'   => $paged,
+                'total'     => $total_pages,
+                'prev_text' => '‹ Anterior',
+                'next_text' => 'Siguiente ›',
+            ] );
+          ?>
+        </div>
+      <?php endif; ?>
+    </div>
+    <?php
+}
+
+add_action( 'admin_enqueue_scripts', function () {
+    if ( ( $_GET['page'] ?? '' ) !== 'silversea-tarifas-browser' ) return;
+    wp_enqueue_script(
+        'silversea-tarifas-browser',
+        SILVERSEA_PLUGIN_URL . 'assets/js/tarifas-browser.js',
+        [], SILVERSEA_VERSION, true
+    );
+    wp_localize_script( 'silversea-tarifas-browser', 'silvSeaTarifas', [
+        'ajaxUrl' => admin_url( 'admin-ajax.php' ),
+        'nonce'   => wp_create_nonce( 'silversea_update_tarifa' ),
+    ] );
+} );
+
+add_action( 'wp_ajax_silversea_update_tarifa', 'silversea_update_tarifa_ajax' );
+
+function silversea_update_tarifa_ajax() {
+    if ( ! current_user_can('manage_woocommerce') ) wp_send_json_error( ['message' => 'No autorizado.'], 403 );
+    if ( ! check_ajax_referer( 'silversea_update_tarifa', 'nonce', false ) ) wp_send_json_error( ['message' => 'Sesión inválida.'], 403 );
+
+    $id = (int) ( $_POST['id'] ?? 0 );
+    if ( ! $id ) wp_send_json_error( ['message' => 'ID inválido.'] );
+
+    $municipio = sanitize_text_field( $_POST['municipio_destino'] ?? '' );
+    $km        = (int) ( $_POST['km'] ?? 0 );
+    $p_sin     = silversea_shipping_parse_price( $_POST['precio_sin_descarga'] ?? '0' );
+    $p_20      = silversea_shipping_parse_price( $_POST['precio_con_desc_20']  ?? '0' );
+    $p_40      = silversea_shipping_parse_price( $_POST['precio_con_desc_40']  ?? '0' );
+
+    if ( $km < 0 || $p_sin < 0 || $p_20 < 0 || $p_40 < 0 )
+        wp_send_json_error( ['message' => 'Los valores no pueden ser negativos.'] );
+
+    global $wpdb;
+    $table = $wpdb->prefix . 'silversea_tarifas';
+
+    $updated = $wpdb->update(
+        $table,
+        [
+            'municipio_destino'   => $municipio,
+            'km'                  => $km,
+            'precio_sin_descarga' => $p_sin,
+            'precio_con_desc_20'  => $p_20,
+            'precio_con_desc_40'  => $p_40,
+        ],
+        [ 'id' => $id ],
+        [ '%s', '%d', '%f', '%f', '%f' ],
+        [ '%d' ]
+    );
+
+    if ( $updated === false ) wp_send_json_error( ['message' => 'Error al guardar en la base de datos.'] );
+
+    $row = $wpdb->get_row( $wpdb->prepare( "SELECT * FROM {$table} WHERE id=%d", $id ), ARRAY_A );
+    if ( ! $row ) wp_send_json_error( ['message' => 'La fila ya no existe (¿fue eliminada?).'] );
+
+    $row['problemas'] = silversea_tarifa_row_problemas( $row );
+    wp_send_json_success( $row );
+}
+
+add_action( 'wp_ajax_silversea_create_tarifa', 'silversea_create_tarifa_ajax' );
+
+function silversea_create_tarifa_ajax() {
+    if ( ! current_user_can('manage_woocommerce') ) wp_send_json_error( ['message' => 'No autorizado.'], 403 );
+    if ( ! check_ajax_referer( 'silversea_update_tarifa', 'nonce', false ) ) wp_send_json_error( ['message' => 'Sesión inválida.'], 403 );
+
+    $origin = sanitize_key( $_POST['origin'] ?? '' );
+    if ( ! in_array( $origin, silversea_get_city_keys('delivery'), true ) )
+        wp_send_json_error( ['message' => 'Ciudad inválida.'] );
+
+    $cp = silversea_normalize_cp( $_POST['cp_destino'] ?? '' );
+    if ( ! $cp ) wp_send_json_error( ['message' => 'El CP debe tener 4 o 5 dígitos.'] );
+
+    global $wpdb;
+    $table = $wpdb->prefix . 'silversea_tarifas';
+
+    if ( silversea_find_tarifa_row( $origin, $cp ) )
+        wp_send_json_error( ['message' => "Ya existe una tarifa para el CP {$cp} en esta ciudad. Usá \"Editar\" en esa fila en vez de crear una nueva."] );
+
+    $municipio = sanitize_text_field( $_POST['municipio_destino'] ?? '' );
+    $km        = (int) ( $_POST['km'] ?? 0 );
+    $p_sin     = silversea_shipping_parse_price( $_POST['precio_sin_descarga'] ?? '0' );
+    $p_20      = silversea_shipping_parse_price( $_POST['precio_con_desc_20']  ?? '0' );
+    $p_40      = silversea_shipping_parse_price( $_POST['precio_con_desc_40']  ?? '0' );
+
+    if ( $km < 0 || $p_sin < 0 || $p_20 < 0 || $p_40 < 0 )
+        wp_send_json_error( ['message' => 'Los valores no pueden ser negativos.'] );
+
+    $inserted = $wpdb->insert( $table, [
+        'ciudad_origen'       => $origin,
+        'cp_destino'          => $cp,
+        'municipio_destino'   => $municipio,
+        'km'                  => $km,
+        'precio_sin_descarga' => $p_sin,
+        'precio_con_desc_20'  => $p_20,
+        'precio_con_desc_40'  => $p_40,
+    ], [ '%s', '%s', '%s', '%d', '%f', '%f', '%f' ] );
+
+    if ( ! $inserted ) wp_send_json_error( ['message' => 'Error al guardar en la base de datos.'] );
+
+    $id  = (int) $wpdb->insert_id;
+    $row = $wpdb->get_row( $wpdb->prepare( "SELECT * FROM {$table} WHERE id=%d", $id ), ARRAY_A );
+
+    $row['problemas']  = silversea_tarifa_row_problemas( $row );
+    $row['delete_url'] = wp_nonce_url(
+        admin_url( 'admin-post.php?action=silversea_delete_tarifa&id=' . $id . '&_wp_referer=' . urlencode( $_SERVER['HTTP_REFERER'] ?? '' ) ),
+        'silversea_delete_tarifa_' . $id
+    );
+
+    wp_send_json_success( $row );
+}
+
+add_action( 'admin_post_silversea_delete_tarifa', 'silversea_handle_delete_tarifa' );
+
+function silversea_handle_delete_tarifa() {
+    if ( ! current_user_can('manage_woocommerce') ) wp_die( 'No autorizado.', 403 );
+
+    $id = (int) ( $_GET['id'] ?? 0 );
+    if ( ! $id || ! wp_verify_nonce( $_GET['_wpnonce'] ?? '', 'silversea_delete_tarifa_' . $id ) ) wp_die( 'Nonce inválido.' );
+
+    global $wpdb;
+    $table = $wpdb->prefix . 'silversea_tarifas';
+    $wpdb->delete( $table, [ 'id' => $id ], [ '%d' ] );
+
+    $redirect = ! empty($_GET['_wp_referer']) ? esc_url_raw( wp_unslash($_GET['_wp_referer']) ) : admin_url('admin.php?page=silversea-tarifas-browser');
+    wp_safe_redirect( $redirect );
+    exit;
+}
+
+add_action( 'admin_post_silversea_export_tarifas', 'silversea_handle_export_tarifas' );
+
+function silversea_handle_export_tarifas() {
+    if ( ! current_user_can('manage_woocommerce') ) wp_die( 'No autorizado.', 403 );
+    if ( ! wp_verify_nonce( $_GET['_wpnonce'] ?? '', 'silversea_export_tarifas' ) ) wp_die( 'Nonce inválido.' );
+
+    global $wpdb;
+    $table  = $wpdb->prefix . 'silversea_tarifas';
+    $origin = sanitize_key( $_GET['origin'] ?? '' );
+    if ( ! in_array( $origin, silversea_get_city_keys('delivery'), true ) ) wp_die( 'Ciudad inválida.' );
+
+    $search        = sanitize_text_field( $_GET['s'] ?? '' );
+    $only_problems = ! empty($_GET['only_problems']);
+
+    $where = $wpdb->prepare( "ciudad_origen = %s", $origin );
+    if ( $search ) {
+        $like   = '%' . $wpdb->esc_like($search) . '%';
+        $where .= $wpdb->prepare( " AND (cp_destino LIKE %s OR municipio_destino LIKE %s)", $like, $like );
+    }
+    if ( $only_problems ) $where .= " AND " . silversea_tarifa_problemas_sql();
+
+    $rows = $wpdb->get_results( "SELECT * FROM {$table} WHERE {$where} ORDER BY cp_destino ASC", ARRAY_A );
+
+    header( 'Content-Type: text/csv; charset=UTF-8' );
+    header( 'Content-Disposition: attachment; filename="tarifas-' . $origin . '-' . date('Y-m-d') . '.csv"' );
+    header( 'Pragma: no-cache' );
+    header( 'Expires: 0' );
+
+    echo "\xEF\xBB\xBF"; // BOM para Excel
+
+    $out = fopen( 'php://output', 'w' );
+    fputcsv( $out, [ 'CP', 'Municipio', 'Km', 'Sin descarga', "Con descarga 20'", "Con descarga 40'", 'Problemas' ], ';' );
+
+    foreach ( $rows as $r ) {
+        fputcsv( $out, [
+            $r['cp_destino'],
+            $r['municipio_destino'],
+            $r['km'],
+            $r['precio_sin_descarga'],
+            $r['precio_con_desc_20'],
+            $r['precio_con_desc_40'],
+            implode( ', ', silversea_tarifa_row_problemas($r) ),
+        ], ';' );
+    }
+
+    fclose($out);
+    exit;
 }
 
 /* ══ 5. PARSERS ════════════════════════════════════════════ */
@@ -1308,7 +1731,11 @@ function silversea_render_city_prices_page() {
     $cities     = silversea_get_cities();
     ?>
     <div class="wrap">
-      <h1>🏙 Precios por Ciudad</h1>
+      <h1 style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;">
+        Precios por Ciudad
+        <a href="<?php echo esc_url( wp_nonce_url( admin_url('admin-post.php?action=silversea_export_city_prices'), 'silversea_export_city_prices' ) ); ?>"
+           class="button">⬇ Exportar CSV</a>
+      </h1>
       <p style="color:#6b7280;font-size:13px;margin-top:4px;">
         Precio del contenedor según la ciudad de retiro o salida elegida por el cliente.
         Dejá vacío para que aplique el precio general de WooCommerce.
@@ -1444,6 +1871,65 @@ function silversea_render_city_prices_page() {
     });
     </script>
     <?php
+}
+
+/* ══════════════════════════════════════════════════════════════
+   EXPORTAR PRECIOS POR CIUDAD — CSV con una columna por ciudad
+══════════════════════════════════════════════════════════════ */
+
+add_action( 'admin_post_silversea_export_city_prices', 'silversea_handle_export_city_prices' );
+
+function silversea_handle_export_city_prices() {
+    if ( ! current_user_can('manage_woocommerce') ) wp_die( 'No autorizado.', 403 );
+    if ( ! wp_verify_nonce( $_GET['_wpnonce'] ?? '', 'silversea_export_city_prices' ) ) wp_die( 'Nonce inválido.' );
+
+    $cities   = silversea_get_cities();
+    $products = get_posts( [
+        'post_type'      => 'product',
+        'post_status'    => [ 'publish', 'draft', 'private', 'pending' ],
+        'posts_per_page' => -1,
+        'orderby'        => [ 'menu_order' => 'ASC', 'title' => 'ASC' ],
+    ] );
+
+    header( 'Content-Type: text/csv; charset=UTF-8' );
+    header( 'Content-Disposition: attachment; filename="precios-por-ciudad-' . date('Y-m-d') . '.csv"' );
+    header( 'Pragma: no-cache' );
+    header( 'Expires: 0' );
+
+    echo "\xEF\xBB\xBF"; // BOM para Excel
+
+    $out = fopen( 'php://output', 'w' );
+
+    $header = [ 'Producto', 'SKU', 'Estado' ];
+    foreach ( $cities as $city ) $header[] = $city['name'];
+    fputcsv( $out, $header, ';' );
+
+    $status_labels = [
+        'publish' => 'Publicado',
+        'draft'   => 'Borrador',
+        'private' => 'Privado',
+        'pending' => 'Pendiente',
+    ];
+
+    foreach ( $products as $post ) {
+        $product = wc_get_product( $post->ID );
+        if ( ! $product ) continue;
+
+        $prices = json_decode( get_post_meta( $post->ID, '_silversea_city_prices', true ) ?: '{}', true );
+        if ( ! is_array($prices) ) $prices = [];
+
+        $line = [
+            $post->post_title,
+            $product->get_sku(),
+            $status_labels[ $post->post_status ] ?? $post->post_status,
+        ];
+        foreach ( $cities as $city ) $line[] = $prices[ $city['key'] ] ?? '';
+
+        fputcsv( $out, $line, ';' );
+    }
+
+    fclose( $out );
+    exit;
 }
 
 /* ══════════════════════════════════════════════════════════════

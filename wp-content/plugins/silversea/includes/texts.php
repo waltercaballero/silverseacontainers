@@ -2,7 +2,7 @@
 /**
  * Silversea – Textos editables del cotizador
  *
- * Permite editar desde el admin (Cotizador → 📝 Textos) todos los textos
+ * Permite editar desde el admin (Cotizador → Textos) todos los textos
  * mostrados al cliente, sin tocar código. Se guardan en la opción
  * `silversea_texts` (array key => valor). Cada texto tiene un default.
  *
@@ -58,7 +58,7 @@ function silversea_text_defaults() {
         'bulk_notice'            => ['Cotizador', 'Aviso "más de 7 contenedores" (HTML)', 'textarea', '<strong>¿Necesita más de 7 contenedores?</strong><br>Póngase en contacto con nuestro equipo comercial enviando un correo a <a href="mailto:sales@silverseacontainers.com">sales@silverseacontainers.com</a>'],
 
         /* ── Mensajes y validaciones (toasts/errores) ── */
-        'msg_quote_saved'        => ['Mensajes', 'Confirmación "Cotización guardada"', 'text', '✓ Cotización guardada'],
+        'msg_quote_saved'        => ['Mensajes', 'Confirmación "Presupuesto guardado"', 'text', '✓ Presupuesto guardado'],
         'msg_quote_saved_sub'    => ['Mensajes', 'Subtítulo confirmación', 'text', 'Recibirá el detalle por email.'],
         'msg_pickup_saved'       => ['Mensajes', 'Confirmación "Recogida guardada"', 'text', '✓ Recogida guardada'],
         'msg_err_select_origin'  => ['Mensajes', 'Error: falta ciudad de salida', 'text', 'Por favor, seleccione la ciudad de salida.'],
@@ -66,11 +66,11 @@ function silversea_text_defaults() {
         'msg_err_server'         => ['Mensajes', 'Error: respuesta inesperada', 'text', 'El servidor devolvió una respuesta inesperada. Recargue la página e inténtelo de nuevo.'],
         'msg_err_calc'           => ['Mensajes', 'Error: al calcular', 'text', 'Error al calcular. Inténtelo de nuevo.'],
         'msg_err_conn'           => ['Mensajes', 'Error: de conexión', 'text', 'Error de conexión. Inténtelo de nuevo.'],
-        'msg_require_quote'      => ['Mensajes', 'Aviso: cotizar antes de añadir', 'text', 'Cotice el envío antes de añadir este contenedor a su selección.'],
+        'msg_require_quote'      => ['Mensajes', 'Aviso: calcular antes de añadir', 'text', 'Calcule el envío antes de añadir este contenedor a su selección.'],
         'msg_color_required'     => ['Mensajes', 'Aviso: elegir color', 'text', 'Seleccione un color RAL antes de añadir a su selección.'],
         'msg_delete_error'       => ['Mensajes', 'Error: al eliminar', 'text', 'Error al eliminar. Inténtelo de nuevo.'],
         'msg_pickup_free'        => ['Mensajes', 'Detalle recogida sin coste', 'text', 'Recogida en depósito sin coste adicional.'],
-        'msg_no_tarifa'          => ['Mensajes', 'Error: sin tarifa (usar %1$s=CP, %2$s=ciudad)', 'textarea', 'No encontramos tarifa para el CP %1$s desde %2$s. Contáctenos para una cotización personalizada.'],
+        'msg_no_tarifa'          => ['Mensajes', 'Error: sin tarifa (usar %1$s=CP, %2$s=ciudad)', 'textarea', 'No encontramos tarifa para el CP %1$s desde %2$s. Contáctenos para un presupuesto personalizado.'],
 
         /* ── Mi selección y página de gracias ── */
         'sel_form_title'         => ['Mi selección', 'Título "Su solicitud"', 'text', 'Su solicitud'],
@@ -153,7 +153,7 @@ function silversea_texts_render_page() {
     }
     ?>
     <div class="wrap" style="max-width:880px;">
-      <h1>📝 Textos del cotizador</h1>
+      <h1>Textos del cotizador</h1>
       <p style="color:#6b7280;font-size:13px;margin-top:4px;">
         Edita los textos que ve el cliente. Se permite HTML básico (negritas, enlaces, saltos de línea).
         Deja un campo vacío para volver a su valor por defecto.

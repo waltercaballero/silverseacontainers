@@ -84,7 +84,7 @@ function scT(key, fallback) {
 
     /* No auto-calcular al restaurar: solo pre-llenar los campos.
        El usuario verá sus preferencias previas listas pero sin mostrar
-       "Cotización guardada" en productos que nunca cotizó. */
+       "Presupuesto guardado" en productos que nunca cotizó. */
   }
 
   var productSize = typeof silvSea !== "undefined" && silvSea.productSize ? silvSea.productSize : "20";
@@ -244,7 +244,7 @@ function scT(key, fallback) {
       /* showFront desactivado — mostrar confirmación neutral sin precio */
       area.classList.remove("sc-hidden");
       priceEl.className = "sc-result-free";
-      priceEl.textContent = scT('msg_quote_saved', "✓ Cotización guardada");
+      priceEl.textContent = scT('msg_quote_saved', "✓ Presupuesto guardado");
       detailEl.textContent = scT('msg_quote_saved_sub', "Recibirá el detalle por email.");
       breakEl.classList.add("sc-hidden");
       daysEl.classList.add("sc-hidden");
@@ -693,7 +693,7 @@ function scShowDeposito(city, infoId) {
       } else {
         btn.dataset.silvseaBlocked = '1';
         btn.style.opacity = '0.45';
-        btn.title = 'Cotizá el envío primero para poder agregar este contenedor';
+        btn.title = 'Calculá el envío primero para poder agregar este contenedor';
       }
     });
   }
@@ -708,7 +708,7 @@ function scShowDeposito(city, infoId) {
       + 'background:#0F2557;color:#fff;padding:14px 24px;border-radius:10px;'
       + 'font-size:14px;font-weight:500;z-index:99999;box-shadow:0 4px 16px rgba(0,0,0,.2);'
       + 'max-width:90vw;text-align:center;';
-    msg.textContent = scT('msg_require_quote', 'Cotice el envío antes de añadir este contenedor a su selección.');
+    msg.textContent = scT('msg_require_quote', 'Calcule el envío antes de añadir este contenedor a su selección.');
     document.body.appendChild(msg);
 
     setTimeout(function() { if ( msg.parentNode ) msg.remove(); }, 3500);

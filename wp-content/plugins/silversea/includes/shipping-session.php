@@ -262,7 +262,7 @@ function silversea_handle_resend_single() {
         wp_die('Nonce inválido.');
 
     $post = get_post($quote_id);
-    if ( ! $post || $post->post_type !== 'silversea_quote' ) wp_die('Cotización no encontrada.');
+    if ( ! $post || $post->post_type !== 'silversea_quote' ) wp_die('Presupuesto no encontrado.');
 
     $debug_mode      = get_option('silversea_demo_mode', '0') === '1';
     $email_from      = 'sales@silverseacontainers.com';
@@ -280,15 +280,15 @@ function silversea_handle_resend_single() {
     if ( $email_type === 'sales' ) {
         $body    = get_post_meta($quote_id, '_sq_email_body_sales', true);
         $to      = $debug_mode ? $email_debug : $email_comercial;
-        $subject = sprintf('[Silversea Ventas] Cotización #%d – %s', $quote_id, $client_name);
+        $subject = sprintf('[Silversea Ventas] Nuevo presupuesto #%d – %s', $quote_id, $client_name);
     } else {
         $body    = get_post_meta($quote_id, '_sq_email_body_client', true);
         $to      = $debug_mode ? $email_debug : $client_email;
-        $subject = sprintf('[SILVERSEA Containers] Su solicitud de cotización #%d', $quote_id);
+        $subject = sprintf('[SILVERSEA Containers] Su solicitud de presupuesto #%d', $quote_id);
         if ( ! $to ) wp_die('El cliente no tiene email registrado.');
     }
 
-    if ( ! $body ) wp_die('No hay contenido de email guardado para esta cotización.');
+    if ( ! $body ) wp_die('No hay contenido de email guardado para este presupuesto.');
 
     wp_mail( $to, $subject, $body, $headers );
 
@@ -400,7 +400,7 @@ function silversea_handle_generate_email_preview() {
     if ( ! wp_verify_nonce($_GET['_wpnonce'] ?? '', 'silversea_gen_preview_' . $quote_id) ) wp_die('Nonce inválido.');
 
     $post = get_post($quote_id);
-    if ( ! $post || $post->post_type !== 'silversea_quote' ) wp_die('Cotización no encontrada.');
+    if ( ! $post || $post->post_type !== 'silversea_quote' ) wp_die('Presupuesto no encontrado.');
 
     $meta_key = $email_type === 'sales' ? '_sq_email_body_sales' : '_sq_email_body_client';
     $body     = silversea_generate_email_body_for_quote( $quote_id, $email_type );
@@ -547,7 +547,7 @@ function silversea_handle_resend_email() {
     if ( ! wp_verify_nonce( $_GET['_wpnonce'] ?? '', 'silversea_resend_' . $quote_id ) ) wp_die('Nonce inválido.');
 
     $post = get_post( $quote_id );
-    if ( ! $post || $post->post_type !== 'silversea_quote' ) wp_die('Cotización no encontrada.');
+    if ( ! $post || $post->post_type !== 'silversea_quote' ) wp_die('Presupuesto no encontrado.');
 
     $data = silversea_load_quote_data( $quote_id );
 
@@ -1057,7 +1057,7 @@ function silversea_email_shipping_html( $data, $show_prices ) {
            . 'padding-top:8px;border-top:1px dashed #e5e7eb;line-height:1.55;">'
            . 'El precio final puede estar sujeto a modificación en casos donde las condiciones de entrega '
            . 'presenten una complejidad especial (accesibilidad limitada, obstáculos en zona de descarga, '
-           . 'cableado aéreo, terreno irregular/arenoso, u otros requisitos no contemplados en la cotización '
+           . 'cableado aéreo, terreno irregular/arenoso, u otros requisitos no contemplados en el presupuesto '
            . 'inicial), o por variaciones en el BAF (Factor de Ajuste de Combustible) aplicables al transporte terrestre.'
            . '</p>';
 
