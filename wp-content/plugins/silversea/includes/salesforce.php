@@ -37,6 +37,32 @@ function silversea_sf_container_types() {
 }
 
 /* ══════════════════════════════════════════════════════════════
+   Container Type (00N8a00000FXdRZ) es un picklist RESTRINGIDO: si el valor no
+   coincide letra por letra con el de Salesforce, Salesforce descarta el lead
+   entero (y Web-to-Lead igual responde 200).
+
+   Los nombres de silversea_sf_container_types() son los que se guardan en el
+   mapeo de cada producto (Cotizador → Salesforce). Algunos valores reales de
+   Salesforce se escriben distinto (typos/comas en el picklist de SF); esta tabla
+   los traduce SOLO al armar el payload, sin tocar el mapeo guardado en la base
+   ni el texto legible de Description.
+
+   nombre interno del mapeo  =>  valor exacto en Salesforce
+══════════════════════════════════════════════════════════════ */
+
+function silversea_sf_container_value_overrides() {
+    return [
+        "40' Reefer"       => "40' Refeer",         /* typo en el picklist de SF */
+        "40' HC Open Side" => "40' HC Open Side,",  /* coma final en el picklist de SF */
+    ];
+}
+
+function silversea_sf_container_value( $internal ) {
+    $overrides = silversea_sf_container_value_overrides();
+    return $overrides[ $internal ] ?? $internal;
+}
+
+/* ══════════════════════════════════════════════════════════════
    PICKLIST — valores válidos de País en Salesforce (00NUm00000G445R)
    Debe coincidir letra por letra con las <option value="..."> del
    <select name="rqa_country"> en request-quote-form.php. Se usa solo
@@ -140,6 +166,70 @@ add_action( 'wp_ajax_silversea_save_sf_types', function() {
 } );
 
 /* ══════════════════════════════════════════════════════════════
+   EXPORTAR MAPEO — CSV producto → ContainerType (interno y enviado a SF)
+   Sirve para contrastar el mapeo contra el picklist de Salesforce.
+══════════════════════════════════════════════════════════════ */
+
+add_action( 'admin_post_silversea_export_sf_mapping', 'silversea_handle_export_sf_mapping' );
+
+function silversea_handle_export_sf_mapping() {
+    if ( ! current_user_can('manage_woocommerce') ) wp_die( 'No autorizado.', 403 );
+    if ( ! wp_verify_nonce( $_GET['_wpnonce'] ?? '', 'silversea_export_sf_mapping' ) ) wp_die( 'Nonce inválido.' );
+
+    $known    = silversea_sf_container_types();
+    $products = get_posts( [
+        'post_type'      => 'product',
+        'post_status'    => 'publish',
+        'posts_per_page' => -1,
+        'orderby'        => 'title',
+        'order'          => 'ASC',
+    ] );
+
+    header( 'Content-Type: text/csv; charset=UTF-8' );
+    header( 'Content-Disposition: attachment; filename="salesforce-mapeo-contenedores-' . date('Y-m-d') . '.csv"' );
+    header( 'Pragma: no-cache' );
+    header( 'Expires: 0' );
+
+    echo "\xEF\xBB\xBF"; // BOM para Excel
+
+    $out = fopen( 'php://output', 'w' );
+
+    fputcsv( $out, [
+        'ID', 'Producto', 'SKU', 'Tipo de producto', 'Categorías',
+        'Mapeo (nombre interno)', 'Valor enviado a Salesforce (Container Type)', 'Observación',
+    ], ';' );
+
+    foreach ( $products as $post ) {
+        $product = wc_get_product( $post->ID );
+        if ( ! $product ) continue;
+
+        $mapped = (string) get_post_meta( $post->ID, 'silversea_sf_container_type', true );
+        $sent   = $mapped === '' ? '' : silversea_sf_container_value( $mapped );
+
+        if ( $mapped === '' )                       $note = 'Sin asignar: se envía vacío';
+        elseif ( ! isset( $known[ $mapped ] ) )     $note = 'Valor no reconocido por el plugin';
+        elseif ( $sent !== $mapped )                $note = 'Traducido: el valor de Salesforce se escribe distinto';
+        else                                        $note = '';
+
+        $cats = wp_get_post_terms( $post->ID, 'product_cat', [ 'fields' => 'names' ] );
+
+        fputcsv( $out, [
+            $post->ID,
+            $post->post_title,
+            $product->get_sku(),
+            $product->is_type('variable') ? 'Variable' : 'Simple',
+            is_wp_error( $cats ) ? '' : implode( ', ', $cats ),
+            $mapped,
+            $sent,
+            $note,
+        ], ';' );
+    }
+
+    fclose( $out );
+    exit;
+}
+
+/* ══════════════════════════════════════════════════════════════
    PÁGINA — mapeo en lote Producto → ContainerType
 ══════════════════════════════════════════════════════════════ */
 
@@ -162,7 +252,11 @@ function silversea_sf_render_mapping_page() {
     $types      = silversea_sf_container_types();
     ?>
     <div class="wrap" style="max-width:820px;">
-      <h1>Salesforce – Tipos de contenedor</h1>
+      <h1 style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;">
+        Salesforce – Tipos de contenedor
+        <a href="<?php echo esc_url( wp_nonce_url( admin_url('admin-post.php?action=silversea_export_sf_mapping'), 'silversea_export_sf_mapping' ) ); ?>"
+           class="button" title="Exporta todos los productos publicados, sin aplicar los filtros">⬇ Exportar CSV</a>
+      </h1>
       <p style="color:#6b7280;font-size:13px;margin-top:4px;">
         Asigná el tipo de contenedor de Salesforce a cada producto. Los productos sin tipo asignado enviarán
         <code>ContainerType</code> vacío al lead (el detalle siempre llega en <em>Description</em>).
@@ -372,6 +466,7 @@ function silversea_sf_metabox( $post ) {
             '00NUm00000WqX8j' => 'Tipo de cliente',
             '00N8a00000FXdRZ' => 'ContainerType',
             '00N8a00000FXdRo' => 'Quantity',
+            '00N8a00000FXdRe' => 'Grade',
             '00N8a00000FXdRt' => 'Modality',
             '00N8a00000FXdRj' => 'Market',
             '00NUm00000WuUnO' => 'Idioma',
@@ -502,8 +597,9 @@ function silversea_sf_build_payload( $d, $products, $quote_id = 0 ) {
         'lead_source'     => 'Web',
         '00N8a00000FXdRj' => 'Europe',
         '00N8a00000FXdRt' => 'Buy',
-        '00N8a00000FXdRZ' => $container_type,
+        '00N8a00000FXdRZ' => silversea_sf_container_value( $container_type ),
         '00N8a00000FXdRo' => (string) $quantity,
+        '00N8a00000FXdRe' => silversea_sf_grade_for_items( $products ),
         'first_name'      => $first_name,
         'last_name'       => $last_name,
         'email'           => $d['email']  ?? '',
@@ -513,7 +609,9 @@ function silversea_sf_build_payload( $d, $products, $quote_id = 0 ) {
         'zip'             => $d['postal'] ?? '',
         'country'         => $d['country'] ?? '',
         '00NUm00000G445R' => $d['country'] ?? '',
-        '00NUm00000WqX8j' => $is_empresa ? 'Empresa' : 'Particular',
+        /* Customer Type: picklist restringido de SF, solo acepta "Individual" o "Company"
+           (no "Particular"/"Empresa": con esos valores Salesforce descarta el lead entero). */
+        '00NUm00000WqX8j' => $is_empresa ? 'Company' : 'Individual',
         '00NUm00000WuUnO' => $d['form_lang']    ?? 'ES',
         '00NUm00000WuUnT' => $d['utm_source']   ?? '',
         '00NUm00000WuUnS' => $d['utm_medium']   ?? '',
@@ -526,6 +624,55 @@ function silversea_sf_build_payload( $d, $products, $quote_id = 0 ) {
         '00NUm00000Ue4V3' => 'SILVERSEA',
         '00NUm00000Ue4V4' => 'SILVERSEA',
     ];
+}
+
+/**
+ * Grade de Salesforce (00N8a00000FXdRe) de UN item: Nuevo → "New", Usado → "Cargo Worthy".
+ * Devuelve '' si no se puede determinar (Salesforce acepta el picklist en blanco).
+ *
+ * El estado guardado en el item (`condition`) viene vacío para las variaciones de
+ * productos variables (p. ej. colores RAL): en esos casos el estado está en el atributo
+ * pa_condicion del producto PADRE, así que se consulta ahí. Último recurso: "Usado" en el
+ * nombre del producto. Nunca se adivina "Nuevo": mejor en blanco que equivocado.
+ */
+function silversea_sf_grade_for_item( $item ) {
+    $cond = strtolower( trim( (string) ( $item['condition'] ?? '' ) ) );
+
+    if ( $cond === '' ) {
+        $product = silversea_resolve_quote_product( $item );
+        if ( $product ) {
+            $lookup_id = $product->is_type('variation') ? $product->get_parent_id() : $product->get_id();
+            $slugs     = wc_get_product_terms( $lookup_id, 'pa_condicion', [ 'fields' => 'slugs' ] );
+            if ( is_array( $slugs ) ) {
+                $slugs = array_map( 'strtolower', $slugs );
+                $used  = in_array( 'usado', $slugs, true );
+                $new   = in_array( 'nuevo', $slugs, true );
+                if ( $used && ! $new )      $cond = 'usado';
+                elseif ( $new && ! $used )  $cond = 'nuevo';
+            }
+        }
+    }
+
+    if ( $cond === '' && stripos( (string) ( $item['name'] ?? '' ), 'usado' ) !== false ) $cond = 'usado';
+
+    if ( $cond === 'usado' ) return 'Cargo Worthy';
+    if ( $cond === 'nuevo' ) return 'New';
+    return '';
+}
+
+/**
+ * Grade del presupuesto completo. Misma regla que ContainerType: solo se envía si TODOS
+ * los productos tienen el mismo Grade; si hay mezcla (nuevo + usado) o alguno indeterminado,
+ * queda vacío (el detalle siempre llega en Description).
+ */
+function silversea_sf_grade_for_items( $products ) {
+    $grades = [];
+    foreach ( $products as $item ) {
+        $g = silversea_sf_grade_for_item( $item );
+        if ( $g === '' ) return '';
+        $grades[ $g ] = true;
+    }
+    return count( $grades ) === 1 ? (string) key( $grades ) : '';
 }
 
 /* ── Reconstruir el payload desde los meta guardados del CPT ──

@@ -369,11 +369,12 @@ Se ejecuta automáticamente al procesar cada cotización (`ywraq_process`), desp
 | `00N8a00000FXdRt` — Modality | `Buy` (fijo) |
 | `00N8a00000FXdRZ` — ContainerType | Ver lógica abajo |
 | `00N8a00000FXdRo` — Quantity | Ver lógica abajo |
+| `00N8a00000FXdRe` — Grade | `New` (nuevo) \| `Cargo Worthy` (usado). Con varios productos, solo si todos tienen el mismo estado; con mezcla queda vacío. Ver lógica abajo |
 | `first_name` / `last_name` | Del formulario. Para empresas: `last_name = nombre de empresa` |
 | `company` | Solo si el cliente es empresa |
 | `email`, `phone`, `city`, `zip` | Del formulario |
 | `country` / `00NUm00000G445R` — País | Value del `<select>` de país del formulario (value en inglés, coincide con el picklist de Salesforce). Se manda dos veces: al campo estándar `country` y al picklist custom, igual que hace el formulario de contacto de Elementor |
-| `00NUm00000WqX8j` — Tipo de cliente | `Empresa` \| `Particular`, según `rqa_client_type` |
+| `00NUm00000WqX8j` — Customer Type | `Company` (empresa) \| `Individual` (particular), según `rqa_client_type`. **Picklist restringido de Salesforce**: con cualquier otro valor (p. ej. `Empresa`/`Particular`) Salesforce descarta el lead entero |
 | `00NUm00000WuUnO` — Idioma | `ES` \| `EN` \| `PT`, tomado de `document.documentElement.lang`. Hoy siempre `ES` (el sitio no tiene versiones EN/PT) |
 | `00NUm00000WuUnT/S/Q/U/R` — UTM Source/Medium/Campaign/Term/Content | Capturados de la URL de entrada y persistidos en `sessionStorage` hasta que el visitante completa el cotizador |
 | `00NUm00000WuUnP` — gclid | **Siempre vacío por ahora.** El template de Salesforce exige consentimiento de marketing antes de capturar gclid y el sitio no tiene ningún gestor de consentimiento de cookies instalado. El hook `hasMarketingConsent()` en `request-quote-form.php` queda listo para activarlo el día que exista un CMP |
@@ -382,13 +383,17 @@ Se ejecuta automáticamente al procesar cada cotización (`ywraq_process`), desp
 ### Lógica ContainerType / Quantity
 
 ```
-Si el carrito tiene 1 solo tipo de contenedor:
-    ContainerType = tipo del item (del mapeo)
-    Quantity      = cantidad del item
+Quantity = SIEMPRE la suma de unidades de todos los productos.
 
-Si el carrito tiene 2 o más tipos diferentes:
-    ContainerType = vacío
-    Quantity      = suma total de unidades
+ContainerType:
+    Todos los productos mapean al MISMO tipo de Salesforce -> ese tipo
+    Tipos distintos, o algún producto sin mapear          -> vacío
+
+Grade (00N8a00000FXdRe):
+    Todos los productos con el mismo estado (Nuevo/Usado) -> New | Cargo Worthy
+    Mezcla de nuevo y usado, o estado indeterminado        -> vacío
+    (el estado sale del item; si viene vacío —variaciones, p. ej. colores RAL—
+     se consulta pa_condicion del producto padre)
 
 Description = SIEMPRE:
     "Pedido del cotizador:
@@ -400,7 +405,7 @@ Description = SIEMPRE:
 
 ### Mapeo Producto → ContainerType
 
-Se configura desde **Cotizador → Salesforce** (página de mapeo en lote).
+Se configura desde **Cotizador → Salesforce** (página de mapeo en lote). El botón **⬇ Exportar CSV** del título descarga todos los productos publicados (sin aplicar los filtros) con el nombre interno del mapeo, el valor que realmente se envía a Salesforce y una observación (sin asignar / traducido / no reconocido). Sirve para contrastar el mapeo con el picklist de Salesforce.
 
 | Producto en la web | ContainerType en Salesforce |
 |--------------------|----------------------------|
@@ -412,15 +417,17 @@ Se configura desde **Cotizador → Salesforce** (página de mapeo en lote).
 | 40' Pies High Cube NOR | `40' High Cube NOR` |
 | 40' Pies NOR | `40' NOR` |
 | 20' Pies Refrigerado (nuevo, usado) | `20' Reefer` |
-| 40' Pies Refrigerado (nuevo, usado) | `40' Reefer` |
+| 40' Pies Refrigerado (nuevo, usado) | `40' Reefer` → se envía **`40' Refeer`** (así está escrito en el picklist de SF) |
 | 20' Pies Open Top (nuevo, usado) | `20' Open Top` |
 | 40' Pies Open Top (nuevo, usado, RAL 5010, RAL 5013) | `40' Open Top` |
 | 20' Pies Doble Puerta (todos los RAL, EOS-1015) | `20' Double Door` |
 | 40' Pies High Cube Doble Puerta (todos los RAL) | `40' HC Double Door` |
-| 40' HC Full Open Side | `40' HC Open Side` |
+| 40' HC Full Open Side | `40' HC Open Side` → se envía **`40' HC Open Side,`** (con coma final, así está en el picklist de SF) |
 | 40' HC Open Side 4 Doors | `40' HC Open Side 4 Doors` |
 
 > El mapeo se guarda como post meta `silversea_sf_container_type` en el producto padre. Las variaciones (colores, condición) heredan el tipo del padre automáticamente.
+
+> **Container Type (`00N8a00000FXdRZ`) es un picklist restringido:** si el valor no coincide letra por letra, Salesforce descarta el lead entero (y Web-to-Lead responde 200 igual). Cuando el valor de Salesforce se escribe distinto del nombre del mapeo, la traducción se define en `silversea_sf_container_value_overrides()` ([salesforce.php](includes/salesforce.php)); se aplica solo al armar el payload, sin tocar el mapeo guardado ni el texto de Description.
 
 ### Panel Salesforce en cada cotización
 

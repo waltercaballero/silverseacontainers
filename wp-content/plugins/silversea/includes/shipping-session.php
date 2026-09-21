@@ -86,6 +86,7 @@ add_filter( 'manage_silversea_quote_posts_columns', 'silversea_quote_columns' );
 function silversea_quote_columns( $cols ) {
     return [
         'cb'          => '<input type="checkbox">',
+        'sq_id'       => 'ID',
         'title'       => 'Presupuesto',
         'sq_client'   => 'Cliente',
         'sq_email'    => 'Email',
@@ -97,10 +98,20 @@ function silversea_quote_columns( $cols ) {
     ];
 }
 
+/* Ancho fijo para la columna ID — la tabla es de layout fijo y si no se estira como las demás */
+add_action( 'admin_head', function() {
+    $screen = get_current_screen();
+    if ( ! $screen || $screen->id !== 'edit-silversea_quote' ) return;
+    echo '<style>.column-sq_id { width: 60px; }</style>';
+} );
+
 add_action( 'manage_silversea_quote_posts_custom_column', 'silversea_quote_column_content', 10, 2 );
 
 function silversea_quote_column_content( $col, $post_id ) {
     switch ( $col ) {
+        case 'sq_id':
+            echo (int) $post_id;
+            break;
         case 'sq_client':
             $type = get_post_meta($post_id, '_sq_client_type', true);
             echo esc_html( get_post_meta($post_id, '_sq_name', true) );
@@ -535,7 +546,7 @@ function silversea_quote_row_actions( $actions, $post ) {
         add_query_arg( [ 'action' => 'silversea_resend_email', 'quote_id' => $post->ID ], admin_url('admin-post.php') ),
         'silversea_resend_' . $post->ID
     );
-    $actions['resend_email'] = '<a href="' . esc_url($url) . '" style="color:#185FA5;">📧 Reenviar emails</a>';
+    $actions['resend_email'] = '<a href="' . esc_url($url) . '" style="color:#185FA5;">Reenviar emails</a>';
     return $actions;
 }
 
