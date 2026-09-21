@@ -604,7 +604,7 @@ if ( ! defined( 'SILVERSEA_SF_BULK_TIME_BUDGET' ) ) {
 }
 
 add_filter( 'bulk_actions-edit-silversea_quote', function( $actions ) {
-    $actions['silversea_sf_resend'] = '☁️ Reenviar a Salesforce';
+    $actions['silversea_sf_resend'] = 'Reenviar a Salesforce';
     return $actions;
 } );
 

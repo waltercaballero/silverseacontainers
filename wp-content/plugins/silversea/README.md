@@ -432,7 +432,7 @@ Cada registro del CPT `silversea_quote` muestra un panel lateral "☁️ Salesfo
 
 **El reenvío siempre reconstruye el payload** desde los meta guardados del presupuesto (`_sq_name`, `_sq_email`, `_sq_products`, `_sq_country`, `_sq_utm_*`, etc.), con la lógica vigente. No reutiliza `_sq_sf_payload` (solo lo usa como último recurso si no hay productos guardados), para no repetir un envío armado con una versión vieja del código.
 
-**Acción masiva:** en el listado de presupuestos, tildar los presupuestos y elegir **☁️ Reenviar a Salesforce** en "Acciones en lote". Envía en orden cronológico (del más viejo al más nuevo), pide confirmación (reenviar un lead que ya había entrado lo duplica) y corta prolijo a los 40 s (`SILVERSEA_SF_BULK_TIME_BUDGET`) para no chocar con el timeout del servidor: si quedan pendientes, el aviso lo indica y se repite la acción con los que faltan.
+**Acción masiva:** en el listado de presupuestos, tildar los presupuestos y elegir **Reenviar a Salesforce** en "Acciones en lote". Envía en orden cronológico (del más viejo al más nuevo), pide confirmación (reenviar un lead que ya había entrado lo duplica) y corta prolijo a los 40 s (`SILVERSEA_SF_BULK_TIME_BUDGET`) para no chocar con el timeout del servidor: si quedan pendientes, el aviso lo indica y se repite la acción con los que faltan.
 
 El payload lo arma una única función, `silversea_sf_build_payload()`, que usan tanto el envío automático como el reenvío. Todo campo nuevo de Salesforce se agrega solo ahí.
 
