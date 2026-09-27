@@ -353,16 +353,13 @@ $ya_cotizo = WC()->session && WC()->session->get('silversea_shipping_data');
                 var langEl  = document.getElementById('rqa-form-language');
                 if (langEl && langMap[lang]) langEl.value = langMap[lang];
 
-                /* Atribución de campaña (UTM). Se guardan en sessionStorage para
-                   sobrevivir la navegación si el visitante entra por una landing
-                   y llega al cotizador varias páginas después. */
-                var utmKeys = ['utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content'];
-                var params  = new URLSearchParams(window.location.search);
-
-                utmKeys.forEach(function(k) {
-                    var v = params.get(k);
-                    if (v) { try { sessionStorage.setItem(k, v); } catch (e) {} }
-                });
+                /* Atribución de campaña (UTM + gclid). La CAPTURA (desde la URL,
+                   con el fallback Direct/Organic/Referral cuando no hay campaña)
+                   corre sitewide en assets/js/scripts.js — necesario porque el
+                   visitante puede entrar por otra página y llegar acá varios
+                   clicks después, cuando el parámetro ya no está en esta URL.
+                   Acá solo se LEE lo que haya en sessionStorage. */
+                var utmKeys = ['utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content', 'gclid'];
                 utmKeys.forEach(function(k) {
                     var el = document.getElementById('rqa-' + k.replace(/_/g, '-'));
                     if (!el) return;
@@ -370,21 +367,6 @@ $ya_cotizo = WC()->session && WC()->session->get('silversea_shipping_data');
                     try { v = sessionStorage.getItem(k); } catch (e) {}
                     if (v) el.value = v;
                 });
-
-                /* gclid: dato personal de Google Ads. Salesforce lo acepta
-                   (00NUm00000WuUnP) pero el sitio todavía no tiene un gestor de
-                   consentimiento de cookies instalado, así que por ahora NO se
-                   captura. Cuando exista un CMP, reemplazar el `return false`
-                   por la comprobación real de consentimiento de marketing. */
-                function hasMarketingConsent() { return false; }
-                if (hasMarketingConsent()) {
-                    var gclid = params.get('gclid');
-                    if (gclid) { try { sessionStorage.setItem('gclid', gclid); } catch (e) {} }
-                    var gclidEl = document.getElementById('rqa-gclid');
-                    var gclidVal = null;
-                    try { gclidVal = sessionStorage.getItem('gclid'); } catch (e) {}
-                    if (gclidEl && gclidVal) gclidEl.value = gclidVal;
-                }
 
                 /* Anti doble-envío: sin esto, cada click extra en "Rellenar una
                    solicitud" (doble click, Enter repetido, impaciencia por falta de
