@@ -385,6 +385,39 @@ $ya_cotizo = WC()->session && WC()->session->get('silversea_shipping_data');
                     try { gclidVal = sessionStorage.getItem('gclid'); } catch (e) {}
                     if (gclidEl && gclidVal) gclidEl.value = gclidVal;
                 }
+
+                /* Anti doble-envío: sin esto, cada click extra en "Rellenar una
+                   solicitud" (doble click, Enter repetido, impaciencia por falta de
+                   feedback) es un submit completo del formulario -> un presupuesto y
+                   un lead a Salesforce por click. Deshabilitar el botón en el primer
+                   submit bloquea los siguientes; el flag `submitting` cubre el caso
+                   límite de dos clicks tan rápidos que ambos alcanzan a disparar el
+                   evento submit antes de que el botón quede disabled. */
+                var form       = document.getElementById('yith-ywraq-mail-form');
+                var submitting = false;
+                if (form) {
+                    form.addEventListener('submit', function(e) {
+                        var btn = form.querySelector('.raq-send-request');
+                        if (submitting) { e.preventDefault(); return; }
+                        submitting = true;
+                        if (btn) {
+                            btn.disabled = true;
+                            if (!btn.dataset.originalText) btn.dataset.originalText = btn.textContent;
+                            btn.textContent = 'Enviando…';
+                        }
+                    });
+                    /* Si el visitante vuelve con el botón "atrás" del navegador, el
+                       formulario puede quedar cacheado (bfcache) con el botón todavía
+                       deshabilitado — restaurarlo para que pueda reenviar si hace falta. */
+                    window.addEventListener('pageshow', function() {
+                        submitting = false;
+                        var btn = form.querySelector('.raq-send-request');
+                        if (btn) {
+                            btn.disabled = false;
+                            if (btn.dataset.originalText) btn.textContent = btn.dataset.originalText;
+                        }
+                    });
+                }
             })();
             </script>
 

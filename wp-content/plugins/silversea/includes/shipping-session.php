@@ -675,6 +675,63 @@ function silversea_redirect_to_thanks( $location, $status ) {
     return add_query_arg('sent', 1, $thanks_url);
 }
 
+/**
+ * Firma de un carrito: mismo product_id + qty + addons = mismo pedido, sin
+ * importar el orden en que llegaron los items. Se usa para detectar reenvíos
+ * duplicados del formulario (ver silversea_find_recent_duplicate_quote).
+ */
+function silversea_quote_product_signature( $products ) {
+    $parts = [];
+    foreach ( (array) $products as $item ) {
+        $addons = (array) ( $item['addons'] ?? [] );
+        sort( $addons );
+        $parts[] = ( (int) ( $item['product_id'] ?? 0 ) ) . 'x' . (int) ( $item['qty'] ?? 0 ) . '+' . implode( ',', $addons );
+    }
+    sort( $parts );
+    return implode( ';', $parts );
+}
+
+/**
+ * Red de seguridad anti-duplicados: busca un presupuesto MUY reciente del mismo
+ * email con exactamente el mismo carrito (mismos productos, cantidades y addons).
+ *
+ * El fix principal es del lado del cliente (el botón de envío se deshabilita al
+ * primer click, en request-quote-form.php), pero eso no cubre todo: un F5 con
+ * reenvío de formulario, dos pestañas abiertas, o JS bloqueado. Sin esto, cada
+ * reenvío crea un presupuesto Y un lead nuevo en Salesforce.
+ *
+ * Ventana corta a propósito (2 minutos): alcanza de sobra para clicks repetidos o
+ * un F5 casi inmediato, y es lo bastante chica para no bloquear por error un
+ * segundo pedido legítimo del mismo cliente con el carrito idéntico.
+ *
+ * @return int 0 si no hay duplicado reciente; el ID del presupuesto existente si lo hay.
+ */
+function silversea_find_recent_duplicate_quote( $email, $products, $window_seconds = 120 ) {
+    $email = trim( (string) $email );
+    if ( ! $email || empty( $products ) ) return 0;
+
+    $signature = silversea_quote_product_signature( $products );
+    $since     = gmdate( 'Y-m-d H:i:s', time() - $window_seconds );
+
+    $candidates = get_posts( [
+        'post_type'      => 'silversea_quote',
+        'post_status'    => 'publish',
+        'posts_per_page' => 5,
+        'orderby'        => 'date',
+        'order'          => 'DESC',
+        'date_query'     => [ [ 'column' => 'post_date_gmt', 'after' => $since, 'inclusive' => true ] ],
+        'meta_query'     => [ [ 'key' => '_sq_email', 'value' => $email, 'compare' => '=' ] ],
+    ] );
+
+    foreach ( $candidates as $post ) {
+        $existing = json_decode( get_post_meta( $post->ID, '_sq_products', true ) ?: '[]', true );
+        if ( silversea_quote_product_signature( $existing ) === $signature ) {
+            return $post->ID;
+        }
+    }
+    return 0;
+}
+
 /* ywraq_process — disponible en versión free */
 add_action( 'ywraq_process', 'silversea_process_and_save', 5, 1 );
 
@@ -734,6 +791,41 @@ function silversea_process_and_save( $args ) {
             'price'        => $unit_price,
             'city'         => $price_city,
         ];
+    }
+
+    /* ── Anti-duplicados: ver silversea_find_recent_duplicate_quote() ──
+       Mismo email + mismo carrito en los últimos 2 minutos = reenvío, no un
+       segundo pedido. Se reutiliza el presupuesto existente: no se crea otro
+       registro, no se manda otro email y no se reenvía a Salesforce. El
+       visitante igual llega a la página de gracias con los datos de ese
+       presupuesto. */
+    $duplicate_of = silversea_find_recent_duplicate_quote( $d['email'], $products );
+    if ( $duplicate_of ) {
+        update_post_meta( $duplicate_of, '_sq_duplicate_attempts',
+            (int) get_post_meta( $duplicate_of, '_sq_duplicate_attempts', true ) + 1 );
+
+        if ( WC()->session ) {
+            WC()->session->set( 'silversea_last_quote', [
+                'quote_id'    => $duplicate_of,
+                'name'        => get_post_meta( $duplicate_of, '_sq_name',             true ),
+                'email'       => get_post_meta( $duplicate_of, '_sq_email',            true ),
+                'phone'       => get_post_meta( $duplicate_of, '_sq_phone',            true ),
+                'type'        => get_post_meta( $duplicate_of, '_sq_client_type',      true ),
+                'city'        => get_post_meta( $duplicate_of, '_sq_city',             true ),
+                'postal'      => get_post_meta( $duplicate_of, '_sq_postal',           true ),
+                'message'     => get_post_meta( $duplicate_of, '_sq_message',          true ),
+                'products'    => json_decode( get_post_meta( $duplicate_of, '_sq_products', true ) ?: '[]', true ),
+                'method'      => get_post_meta( $duplicate_of, '_sq_shipping_method',    true ),
+                'origin'      => get_post_meta( $duplicate_of, '_sq_shipping_origin',    true ),
+                'cp'          => get_post_meta( $duplicate_of, '_sq_shipping_cp',        true ),
+                'transport'   => get_post_meta( $duplicate_of, '_sq_shipping_transport', true ),
+                'pickup'      => get_post_meta( $duplicate_of, '_sq_shipping_pickup',    true ),
+                'price'       => (float) get_post_meta( $duplicate_of, '_sq_shipping_price', true ),
+                'consolidated'=> null,
+            ] );
+            WC()->session->__unset( 'silversea_shipping_data' );
+        }
+        return;
     }
 
     /* Guardar CPT silversea_quote */

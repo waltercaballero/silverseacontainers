@@ -360,6 +360,12 @@ Ambos emails se guardan como meta del CPT y se pueden **editar y reenviar** desd
 
 Se ejecuta automáticamente al procesar cada cotización (`ywraq_process`), después de guardar el CPT y enviar los emails.
 
+### Anti-duplicados
+
+Antes de guardar el CPT, `silversea_process_and_save()` (en `includes/shipping-session.php`) chequea si el mismo email ya generó un presupuesto con **exactamente el mismo carrito** (mismos `product_id`, cantidad y addons, sin importar el orden) en los **últimos 2 minutos** (`silversea_find_recent_duplicate_quote()`). Si lo encuentra, no crea otro registro, no manda otro email y no reenvía el lead a Salesforce — reutiliza los datos del presupuesto existente para la página de gracias.
+
+Esto es una red de seguridad; el fix principal es del lado del cliente: el botón de envío del formulario (`request-quote-form.php`) se deshabilita en el primer submit, para que un doble click o un Enter repetido no dispare varios envíos completos.
+
 ### Campos enviados (Web-to-Lead)
 
 | Campo Salesforce | Valor |
