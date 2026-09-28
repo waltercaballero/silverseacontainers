@@ -3,13 +3,17 @@
    TODAS las páginas vía lcs_enqueue_flag_dropdown_assets, a diferencia
    del resto de este archivo que solo actúa en elementos puntuales).
 
-   Por qué acá y no solo en el formulario de presupuesto: si la campaña
-   apunta a otra página (home, un producto, una landing) y el visitante
-   navega internamente antes de llegar al cotizador, la URL de la página
-   del cotizador ya no tiene "?utm_source=...". Hay que capturarlo en la
-   PRIMERA página que ve, guardarlo en sessionStorage, y sobrevive la
-   navegación hasta que se envía el formulario (request-quote-form.php
-   solo LEE de sessionStorage, no captura).
+   Por qué acá y no solo en el formulario que se está llenando: si la
+   campaña apunta a otra página (home, un producto, una landing) y el
+   visitante navega internamente antes de llegar al formulario, esa URL
+   ya no tiene "?utm_source=...". Hay que capturarlo en la PRIMERA
+   página que ve, guardarlo en sessionStorage, y sobrevive la navegación.
+
+   Dos consumidores leen esto (ninguno de los dos vuelve a capturar):
+   - El cotizador (request-quote-form.php).
+   - Cualquier formulario de Elementor Pro con los campos ocultos
+     correspondientes, vía silverseaFillElementorAttribution() más abajo
+     (p. ej. el widget "FormularioSalesforce" — ver README).
 ══════════════════════════════════════════════════════════════ */
 (function () {
   try {
@@ -62,6 +66,47 @@
     }
   } catch (e) {}
 })();
+
+/* ══════════════════════════════════════════════════════════════
+   Completa los campos ocultos de atribución (UTM/gclid/idioma) en
+   CUALQUIER formulario de Elementor Pro del sitio — p. ej.
+   "FormularioSalesforce" (silversea.php, hook elementor_pro/forms/new_record).
+
+   El campo oculto tiene que existir en el widget de Elementor con el
+   Field ID exacto (ver README, sección "Formulario de contacto de
+   Elementor"). Si no existe, este script no hace nada — no rompe nada
+   en formularios que no tengan esos campos.
+
+   Corre dos veces a propósito: una vez al cargar la página (cubre el
+   caso normal) y otra vez justo antes de cualquier submit de un
+   ".elementor-form" en fase de captura (corre ANTES que el propio JS
+   de Elementor procese el submit) — cubre formularios que Elementor
+   inserta después del DOMContentLoaded, como los que viven dentro de
+   un popup.
+══════════════════════════════════════════════════════════════ */
+function silverseaFillElementorAttribution() {
+  try {
+    var utmFieldIds = ['utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content', 'gclid'];
+    utmFieldIds.forEach(function (id) {
+      var v = null;
+      try { v = sessionStorage.getItem(id); } catch (e) {}
+      if (!v) return;
+      document.querySelectorAll('[name="form_fields[' + id + ']"]').forEach(function (el) { el.value = v; });
+    });
+
+    var lang    = (document.documentElement.lang || 'es').slice(0, 2).toLowerCase();
+    var langMap = { es: 'ES', en: 'EN', pt: 'PT' };
+    if (langMap[lang]) {
+      document.querySelectorAll('[name="form_fields[form_language]"]').forEach(function (el) { el.value = langMap[lang]; });
+    }
+  } catch (e) {}
+}
+document.addEventListener('DOMContentLoaded', silverseaFillElementorAttribution);
+document.addEventListener('submit', function (e) {
+  if (e.target && e.target.classList && e.target.classList.contains('elementor-form')) {
+    silverseaFillElementorAttribution();
+  }
+}, true);
 
 /*
 document.addEventListener('DOMContentLoaded', function () {

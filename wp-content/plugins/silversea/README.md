@@ -451,6 +451,28 @@ El payload lo arma una única función, `silversea_sf_build_payload()`, que usan
 
 > **Ojo con el estado "✓ Enviado":** Web-to-Lead responde HTTP 200 aunque Salesforce descarte el lead (picklist inválido, validation rule, Flow con error…). El panel solo confirma que la petición llegó, no que el lead se creó. Para ver el error real, reenviar el payload con `debug=1` y `debugEmail=<email>`: Salesforce envía un informe con el motivo.
 
+### Formulario de contacto de Elementor (fuera del cotizador)
+
+El sitio tiene un **segundo** formulario a Salesforce, totalmente aparte del cotizador: el widget de Elementor Pro llamado exactamente **`FormularioSalesforce`**, usado como formulario de contacto en otras páginas. Lo procesa un hook independiente en `silversea.php` (`elementor_pro/forms/new_record`) — no pasa por `includes/salesforce.php` ni por `silversea_sf_build_payload()`.
+
+Lee cada campo del widget por su **Field ID** (`$record->get('fields')[ID]`). Para que un campo llegue a Salesforce, tiene que existir en el widget de Elementor con exactamente ese ID — si no existe, el código simplemente lo manda vacío, no rompe nada.
+
+**Campos de atribución.** Igual que el cotizador, manda idioma/UTM/gclid, pero necesitan el campo oculto correspondiente creado a mano en el widget (esto no se puede hacer por código, es edición del formulario en el editor de Elementor):
+
+| Field ID a crear en Elementor (tipo "Hidden") | Campo Salesforce |
+|---|---|
+| `form_language` | `00NUm00000WuUnO` — Idioma |
+| `utm_source`    | `00NUm00000WuUnT` — UTM Source |
+| `utm_medium`    | `00NUm00000WuUnS` — UTM Medium |
+| `utm_campaign`  | `00NUm00000WuUnQ` — UTM Campaign |
+| `utm_term`      | `00NUm00000WuUnU` — UTM Term |
+| `utm_content`   | `00NUm00000WuUnR` — UTM Content |
+| `gclid`         | `00NUm00000WuUnP` — gclid (hoy siempre vacío, mismo motivo que en el cotizador: sin gestor de consentimiento de cookies instalado) |
+
+Pasos en el editor de Elementor, uno por fila de la tabla: agregar un campo tipo **Hidden Field**, en **ID** poner el valor exacto de la columna izquierda (sin espacios, tal cual), dejar el **Default Value** vacío. No hace falta label ni que sea visible — son campos ocultos.
+
+**Completado automático.** `assets/js/scripts.js` (función `silverseaFillElementorAttribution`) busca esos campos por `name="form_fields[ID]"` en cualquier página y los completa desde `sessionStorage` — el mismo dato que ya captura el script de atribución sitewide (ver más abajo). Corre al cargar la página y de nuevo justo antes de cualquier submit de un `.elementor-form` (cubre formularios que Elementor inserta después, como los de un popup). Si el campo no existe todavía en el widget, no hace nada — se puede desplegar el JS antes de terminar de agregar los campos en Elementor sin que rompa nada.
+
 ---
 
 ## Shortcodes de la página "Mi selección"

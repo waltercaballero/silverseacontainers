@@ -753,6 +753,20 @@ add_action( 'elementor_pro/forms/new_record', function( $record, $handler ) {
 		//'00N8a00000FXdRe' => $fields['00N8a00000FXdRe'] ?? 'Cargo Worthy',	// Estado
 		'00NUm00000Ue4V3' => 'SILVERSEA',
         '00NUm00000Ue4V4' => 'SILVERSEA',
+
+        /* Atribución (UTM/gclid/idioma) — requiere que el widget de Elementor
+           tenga un campo oculto con ese mismo Field ID (ver README). Si el
+           campo no existe en el widget, $fields[...] simplemente no está y
+           se manda vacío; no rompe nada. Lo completa assets/js/scripts.js
+           (silverseaFillElementorAttribution) desde sessionStorage antes
+           del submit, igual que en el cotizador. */
+        '00NUm00000WuUnO' => $fields['form_language'] ?? '',	// Idioma
+        '00NUm00000WuUnT' => $fields['utm_source']    ?? '',	// UTM Source
+        '00NUm00000WuUnS' => $fields['utm_medium']    ?? '',	// UTM Medium
+        '00NUm00000WuUnQ' => $fields['utm_campaign']  ?? '',	// UTM Campaign
+        '00NUm00000WuUnU' => $fields['utm_term']      ?? '',	// UTM Term
+        '00NUm00000WuUnR' => $fields['utm_content']   ?? '',	// UTM Content
+        '00NUm00000WuUnP' => $fields['gclid']         ?? '',	// gclid
     ];
 
 		$to = 'waltercaballero@gmail.com';
