@@ -1639,7 +1639,8 @@ add_action( 'wp_ajax_silversea_save_city_prices', function() {
     if ( ! is_array( $items ) ) wp_send_json_error( ['message' => 'Datos inválidos.'] );
 
     $valid_cities = silversea_get_city_keys();
-    $saved = 0;
+    $saved   = 0;
+    $changes = [];
 
     foreach ( $items as $item ) {
         $id = (int) ( $item['id'] ?? 0 );
@@ -1653,11 +1654,112 @@ add_action( 'wp_ajax_silversea_save_city_prices', function() {
                 $prices[ $city ] = number_format( (float)$price, 2, '.', '' );
             }
         }
+
+        $old_raw = get_post_meta( $id, '_silversea_city_prices', true );
+        $old     = $old_raw ? json_decode( $old_raw, true ) : [];
+        if ( ! is_array( $old ) ) $old = [];
+        foreach ( $valid_cities as $city ) {
+            $o = isset( $old[ $city ] )    ? (float) $old[ $city ]    : null;
+            $n = isset( $prices[ $city ] ) ? (float) $prices[ $city ] : null;
+            if ( $o === null && $n === null ) continue;
+            if ( $o !== null && $n !== null && abs( $o - $n ) < 0.005 ) continue;
+            $changes[] = [ 'product' => get_the_title( $id ), 'city' => $city, 'old' => $o, 'new' => $n ];
+        }
+
         update_post_meta( $id, '_silversea_city_prices', wp_json_encode( $prices ) );
         $saved++;
     }
 
-    wp_send_json_success( ['saved' => $saved] );
+    $notified = $changes ? silversea_notify_city_price_changes( $changes ) : null;
+
+    wp_send_json_success( [
+        'saved'    => $saved,
+        'changes'  => count( $changes ),
+        'notified' => $notified, // null = sin cambios o aviso desactivado; int = destinatarios; false = falló el envío
+    ] );
+} );
+
+/* ══════════════════════════════════════════════════════════════
+   AVISO POR EMAIL — cambios en precios por ciudad
+══════════════════════════════════════════════════════════════ */
+
+/** Separa un texto en emails (coma, punto y coma, espacios o saltos de línea). */
+function silversea_parse_email_list( $raw ) {
+    $valid = []; $invalid = [];
+    foreach ( preg_split( '/[\s,;]+/', (string) $raw, -1, PREG_SPLIT_NO_EMPTY ) as $candidate ) {
+        $email = sanitize_email( $candidate );
+        if ( $email && is_email( $email ) ) $valid[ strtolower($email) ] = $email;
+        else $invalid[] = $candidate;
+    }
+    return [ 'valid' => array_values( $valid ), 'invalid' => $invalid ];
+}
+
+/**
+ * Envía el detalle de cambios a los destinatarios configurados.
+ * @return int|false|null  null si el aviso está desactivado o no hay destinatarios;
+ *                         cantidad de destinatarios si se envió; false si wp_mail falló.
+ */
+function silversea_notify_city_price_changes( array $changes ) {
+    if ( get_option( 'silversea_city_prices_notify_on', '0' ) !== '1' ) return null;
+    $recipients = silversea_parse_email_list( get_option( 'silversea_city_prices_notify_emails', '' ) )['valid'];
+    if ( ! $recipients ) return null;
+
+    $user  = wp_get_current_user();
+    $who   = $user && $user->exists() ? $user->display_name : 'Un administrador';
+    $when  = wp_date( 'd/m/Y H:i' );
+    $money = function ( $v ) { return $v === null ? '—' : number_format( $v, 2, ',', '.' ) . ' €'; };
+
+    $rows = '';
+    foreach ( $changes as $c ) {
+        $rows .= '<tr>'
+            . '<td style="padding:6px 10px;border:1px solid #e5e7eb;">' . esc_html( $c['product'] ) . '</td>'
+            . '<td style="padding:6px 10px;border:1px solid #e5e7eb;">' . esc_html( silversea_origin_label( $c['city'] ) ) . '</td>'
+            . '<td style="padding:6px 10px;border:1px solid #e5e7eb;text-align:right;color:#6b7280;">' . $money( $c['old'] ) . '</td>'
+            . '<td style="padding:6px 10px;border:1px solid #e5e7eb;text-align:right;font-weight:600;">' . $money( $c['new'] ) . '</td>'
+            . '</tr>';
+    }
+
+    $body = '<div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#222D5A;">'
+        . '<p><strong>' . esc_html( $who ) . '</strong> actualizó los precios por ciudad el ' . esc_html( $when ) . '.</p>'
+        . '<p>' . count( $changes ) . ' cambio(s):</p>'
+        . '<table style="border-collapse:collapse;font-size:13px;">'
+        . '<thead><tr style="background:#f5f5f5;">'
+        . '<th style="padding:6px 10px;border:1px solid #e5e7eb;text-align:left;">Producto</th>'
+        . '<th style="padding:6px 10px;border:1px solid #e5e7eb;text-align:left;">Ciudad</th>'
+        . '<th style="padding:6px 10px;border:1px solid #e5e7eb;text-align:right;">Antes</th>'
+        . '<th style="padding:6px 10px;border:1px solid #e5e7eb;text-align:right;">Ahora</th>'
+        . '</tr></thead><tbody>' . $rows . '</tbody></table>'
+        . '<p style="font-size:12px;color:#6b7280;">Aviso automático del cotizador de ' . esc_html( get_bloginfo( 'name' ) ) . '.</p>'
+        . '</div>';
+
+    $sent = wp_mail(
+        $recipients,
+        sprintf( '[SILVERSEA] Precios por ciudad actualizados (%d cambio%s)', count( $changes ), count( $changes ) === 1 ? '' : 's' ),
+        $body,
+        [ 'Content-Type: text/html; charset=UTF-8', 'From: SILVERSEA Containers <sales@silverseacontainers.com>' ]
+    );
+
+    return $sent ? count( $recipients ) : false;
+}
+
+add_action( 'wp_ajax_silversea_save_city_prices_notify', function () {
+    check_ajax_referer( 'silversea_city_prices', 'nonce' );
+    if ( ! current_user_can( 'manage_woocommerce' ) ) wp_send_json_error( null, 403 );
+
+    $parsed = silversea_parse_email_list( wp_unslash( $_POST['emails'] ?? '' ) );
+    $on     = ! empty( $_POST['on'] ) && $_POST['on'] !== '0' && $_POST['on'] !== 'false';
+
+    if ( $on && ! $parsed['valid'] )
+        wp_send_json_error( [ 'message' => 'Para activar el aviso ingresá al menos un email válido.' ] );
+
+    update_option( 'silversea_city_prices_notify_emails', implode( ', ', $parsed['valid'] ) );
+    update_option( 'silversea_city_prices_notify_on', $on ? '1' : '0' );
+
+    wp_send_json_success( [
+        'emails'  => implode( ', ', $parsed['valid'] ),
+        'invalid' => $parsed['invalid'],
+        'on'      => $on,
+    ] );
 } );
 
 /* ══════════════════════════════════════════════════════════════
@@ -1761,6 +1863,21 @@ function silversea_render_city_prices_page() {
         <span style="font-size:13px;color:#9ca3af;"><?php echo count($products); ?> productos</span>
       </form>
 
+      <div style="background:#fff;border:1px solid #ddd;border-radius:8px;padding:14px 18px;margin-bottom:16px;max-width:760px;">
+        <strong style="font-size:13px;">Aviso por email al guardar cambios</strong>
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:8px;">
+          <input type="text" id="scp-notify-emails" value="<?php echo esc_attr( get_option('silversea_city_prices_notify_emails','') ); ?>"
+                 placeholder="uno@empresa.com, otro@empresa.com" style="flex:1;min-width:280px;height:34px;padding:0 8px;">
+          <label style="display:flex;align-items:center;gap:6px;font-size:13px;">
+            <input type="checkbox" id="scp-notify-on" <?php checked( '1', get_option('silversea_city_prices_notify_on','0') ); ?>>
+            Avisar al guardar
+          </label>
+          <button type="button" id="scp-notify-save" class="button">Guardar aviso</button>
+          <span id="scp-notify-status" style="font-size:13px;"></span>
+        </div>
+        <p class="description" style="margin:6px 0 0;">Varios emails separados por coma, punto y coma o salto de línea. Cada vez que guardes precios con cambios, se envía el detalle (producto, ciudad, antes y ahora) a todos.</p>
+      </div>
+
       <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;">
         <button id="scp-save" class="button button-primary" style="height:36px;padding:0 20px;font-size:14px;">
           💾 Guardar precios
@@ -1836,6 +1953,26 @@ function silversea_render_city_prices_page() {
 
       $(document).on('input', '.scp-input', function() { $(this).addClass('scp-dirty'); });
 
+      $('#scp-notify-save').on('click', function() {
+        var $btn = $(this), $st = $('#scp-notify-status');
+        $btn.prop('disabled', true);
+        $st.text('').css('color','#6b7280');
+        $.post(ajaxurl, {
+          action: 'silversea_save_city_prices_notify', nonce: nonce,
+          emails: $('#scp-notify-emails').val(), on: $('#scp-notify-on').is(':checked') ? '1' : '0'
+        }).done(function(res) {
+          if (res.success) {
+            $('#scp-notify-emails').val(res.data.emails);
+            var msg = '✓ Guardado.';
+            if (res.data.invalid.length) msg += ' Ignorados por inválidos: ' + res.data.invalid.join(', ');
+            $st.css('color', res.data.invalid.length ? '#d97706' : '#059669').text(msg);
+          } else {
+            $st.css('color','#dc2626').text('✗ ' + ((res.data && res.data.message) || 'Error al guardar.'));
+          }
+        }).fail(function() { $st.css('color','#dc2626').text('✗ Error de conexión.'); })
+          .always(function() { $btn.prop('disabled', false); });
+      });
+
       $('#scp-save').on('click', function() {
         var $btn = $(this), $status = $('#scp-status');
         var items = [];
@@ -1856,7 +1993,10 @@ function silversea_render_city_prices_page() {
         $.post(ajaxurl, { action:'silversea_save_city_prices', nonce:nonce, items:JSON.stringify(items) })
           .done(function(res) {
             if (res.success) {
-              $status.css('color','#059669').text('✓ ' + res.data.saved + ' producto(s) guardados.');
+              var msg = '✓ ' + res.data.saved + ' producto(s) guardados.', color = '#059669';
+              if (res.data.notified === false) { msg += ' ⚠ No se pudo enviar el aviso por email.'; color = '#d97706'; }
+              else if (res.data.notified) { msg += ' Aviso enviado a ' + res.data.notified + ' destinatario(s) (' + res.data.changes + ' cambio(s)).'; }
+              $status.css('color', color).text(msg);
               $('.scp-input').removeClass('scp-dirty');
             } else {
               $status.css('color','#dc2626').text('✗ Error al guardar.');

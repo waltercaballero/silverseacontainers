@@ -972,7 +972,8 @@ function silversea_email_products_html_from_meta( $post_id, $show_prices, $city 
         $price_html = '';
         if ( $show_prices && $price > 0 ) {
             $price_html = ' &nbsp;<strong style="color:#0F2557;">€ ' . number_format($price * $qty, 2, ',', '.') . '</strong>'
-                        . ' <span style="color:#9ca3af;font-size:12px;">(€ ' . number_format($price, 2, ',', '.') . ' c/u)</span>';
+                        . ' <span style="color:#9ca3af;font-size:12px;">(€ ' . number_format($price, 2, ',', '.') . ' c/u)</span>'
+                        . silversea_iva_tag();
         }
 
         $html .= '<div style="padding:14px 0;border-bottom:1px solid #f0f0f0;">';
@@ -998,7 +999,7 @@ function silversea_email_products_html_from_meta( $post_id, $show_prices, $city 
             $ap    = isset($addon_prices[$addon]) ? (float)$addon_prices[$addon] : 0.0;
             $label = '+ ' . esc_html($addon);
             if ( $show_prices && $ap > 0 )
-                $label .= ' — Desde ' . number_format($ap, 2, ',', '.') . ' € por contenedor';
+                $label .= ' — Desde ' . number_format($ap, 2, ',', '.') . ' € por contenedor + IVA';
             $html .= '<span class="ad" style="display:inline-block;margin:3px 4px 0 0;font-size:12px;color:#fff;background:#222E5C;padding:2px 8px;border-radius:4px;">' . $label . '</span>';
         }
 
@@ -1053,7 +1054,8 @@ function silversea_email_products_html( $raq_content, $show_prices, $city = '' )
         $price_html = '';
         if ( $show_prices && $price > 0 ) {
             $price_html = ' &nbsp;<strong style="color:#0F2557;">€ ' . number_format($price * $qty, 2, ',', '.') . '</strong>'
-                        . ' <span style="color:#9ca3af;font-size:12px;">(€ ' . number_format($price, 2, ',', '.') . ' c/u)</span>';
+                        . ' <span style="color:#9ca3af;font-size:12px;">(€ ' . number_format($price, 2, ',', '.') . ' c/u)</span>'
+                        . silversea_iva_tag();
         }
 
         $html .= '<div class="pb" style="padding:12px 0;border-bottom:1px solid #f3f4f6;">';
@@ -1078,7 +1080,7 @@ function silversea_email_products_html( $raq_content, $show_prices, $city = '' )
             $ap    = isset($addon_prices[$addon]) ? (float)$addon_prices[$addon] : 0.0;
             $label = '+ ' . esc_html($addon);
             if ( $show_prices && $ap > 0 )
-                $label .= ' — Desde ' . number_format($ap, 2, ',', '.') . ' € por contenedor';
+                $label .= ' — Desde ' . number_format($ap, 2, ',', '.') . ' € por contenedor + IVA';
             $html .= '<span class="ad" style="display:inline-block;margin:3px 4px 0 0;font-size:12px;color:#fff;background:#222E5C;padding:2px 8px;border-radius:4px;">' . $label . '</span>';
         }
 
@@ -1130,15 +1132,15 @@ function silversea_email_shipping_html( $data, $show_prices ) {
             $html .= '<tr><td style="padding:5px 12px;border-bottom:1px solid #f0f0f0;color:#374151;">'
                    . esc_html($b['label']) . '</td>'
                    . '<td style="padding:5px 12px;border-bottom:1px solid #f0f0f0;text-align:right;font-weight:600;">€ '
-                   . number_format((float)$b['price'],2,',','.') . '</td></tr>';
+                   . number_format((float)$b['price'],2,',','.') . silversea_iva_tag() . '</td></tr>';
         }
         $html .= '<tr style="background:#f8fafc;"><td style="padding:8px 12px;font-weight:700;">Total envío</td>'
                . '<td style="padding:8px 12px;text-align:right;font-weight:700;color:#0F2557;">€ '
-               . number_format((float)$con['total'],2,',','.') . '</td></tr>';
+               . number_format((float)$con['total'],2,',','.') . silversea_iva_tag() . '</td></tr>';
         $html .= '</table>';
     } elseif ( $show_prices && isset($data['price']) && $data['price'] > 0 ) {
         $html .= '<p style="font-size:14px;font-weight:600;color:#0F2557;margin-top:8px;">€ '
-               . number_format((float)$data['price'],2,',','.') . '</p>';
+               . number_format((float)$data['price'],2,',','.') . silversea_iva_tag() . '</p>';
     } elseif ( ! empty($data['price_pending']) ) {
         /* CP tiene tarifa sin descarga pero no tiene con descarga */
         $html .= '<p style="margin:10px 0 0;font-size:13px;font-weight:600;color:#d97706;">'
@@ -1173,6 +1175,11 @@ function silversea_email_shipping_html( $data, $show_prices ) {
    Un <tr> por contenedor + un <tr> por cada extra seleccionado.
    Usadas solo en silversea_email_template() (rama cliente, show_prices=1).
 ══════════════════════════════════════════════════════════════ */
+
+/* Indicación "+ IVA" que acompaña a cada precio de los emails */
+function silversea_iva_tag() {
+    return ' <span style="font-size:11px;font-weight:400;color:#5A6478;white-space:nowrap;">+ IVA</span>';
+}
 
 function silversea_email_client_row_html( $label_html, $sub_html, $price_html ) {
     $html  = '<tr>';
@@ -1222,7 +1229,7 @@ function silversea_email_client_product_rows( $raq_content, $city = '' ) {
 
         $subtitle   = array_filter( [ $condicion, $color_label ] );
         $label      = (int)$qty . ' × ' . esc_html($title) . ( $subtitle ? ' · ' . esc_html(implode(' · ', $subtitle)) : '' );
-        $price_html = ( $price > 0 ) ? number_format($price * $qty, 2, ',', '.') . ' €' : '';
+        $price_html = ( $price > 0 ) ? number_format($price * $qty, 2, ',', '.') . ' €' . silversea_iva_tag() : '';
 
         $html .= silversea_email_client_row_html( $label, $description ? esc_html($description) : '', $price_html );
 
@@ -1231,7 +1238,7 @@ function silversea_email_client_product_rows( $raq_content, $city = '' ) {
         foreach ( $addons as $addon ) {
             $ap         = isset($addon_prices[$addon]) ? (float)$addon_prices[$addon] : 0.0;
             $label      = esc_html($addon) . ' <span style="font-size:12px;color:#5A6478;">(seleccionado)</span>';
-            $price_html = ( $ap > 0 ) ? number_format($ap * $qty, 2, ',', '.') . ' €' : '';
+            $price_html = ( $ap > 0 ) ? number_format($ap * $qty, 2, ',', '.') . ' €' . silversea_iva_tag() : '';
             $html .= silversea_email_client_row_html( $label, '', $price_html );
         }
     }
@@ -1267,14 +1274,14 @@ function silversea_email_client_product_rows_from_meta( $post_id, $city = '' ) {
 
         $subtitle   = array_filter( [ $condicion, $color_label ] );
         $label      = (int)$qty . ' × ' . esc_html($name) . ( $subtitle ? ' · ' . esc_html(implode(' · ', $subtitle)) : '' );
-        $price_html = ( $price > 0 ) ? number_format($price * $qty, 2, ',', '.') . ' €' : '';
+        $price_html = ( $price > 0 ) ? number_format($price * $qty, 2, ',', '.') . ' €' . silversea_iva_tag() : '';
 
         $html .= silversea_email_client_row_html( $label, $description ? esc_html($description) : '', $price_html );
 
         foreach ( $addons as $addon ) {
             $ap         = isset($addon_prices[$addon]) ? (float)$addon_prices[$addon] : 0.0;
             $label      = esc_html($addon) . ' <span style="font-size:12px;color:#5A6478;">(seleccionado)</span>';
-            $price_html = ( $ap > 0 ) ? number_format($ap * $qty, 2, ',', '.') . ' €' : '';
+            $price_html = ( $ap > 0 ) ? number_format($ap * $qty, 2, ',', '.') . ' €' . silversea_iva_tag() : '';
             $html .= silversea_email_client_row_html( $label, '', $price_html );
         }
     }
@@ -1313,7 +1320,7 @@ function silversea_email_client_shipping_row( $data ) {
     }
 
     if ( $price !== null ) {
-        $price_html = number_format($price, 2, ',', '.') . ' €';
+        $price_html = number_format($price, 2, ',', '.') . ' €' . silversea_iva_tag();
     } else {
         $price_html = '<span style="color:#d97706;">A confirmar</span>';
     }
@@ -1379,6 +1386,7 @@ function silversea_email_template( $quote_id, $data, $products_html, $shipping_h
             . '</table></div>'
             . '<div style="padding:24px 32px;border-bottom:1px solid #e5e7eb;">'
             . '<h2 style="margin:0 0 10px;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#6b7280;">Productos</h2>'
+            . '<p style="margin:0 0 8px;font-size:12px;color:#6b7280;">Todos los precios indicados son + IVA.</p>'
             . $products_html . '</div>'
             . '<div style="padding:24px 32px;border-bottom:1px solid #e5e7eb;">'
             . '<h2 style="margin:0 0 10px;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#6b7280;">Envío</h2>'
@@ -1424,7 +1432,7 @@ function silversea_email_template( $quote_id, $data, $products_html, $shipping_h
         if ( $subtotal !== null && $subtotal > 0 ) {
             $iva   = $subtotal * $iva_rate;
             $total = $subtotal + $iva;
-            $quote_rows .= '<tr><td style="padding:10px 0 4px 0;font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#222D5A;">Subtotal</td>'
+            $quote_rows .= '<tr><td style="padding:10px 0 4px 0;font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#222D5A;">Subtotal (sin IVA)</td>'
                          . '<td align="right" style="padding:10px 0 4px 0;white-space:nowrap;font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#222D5A;">' . number_format($subtotal, 2, ',', '.') . ' €</td></tr>';
             $quote_rows .= '<tr><td style="padding:0 0 10px 0;font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#222D5A;">IVA (21%)</td>'
                          . '<td align="right" style="padding:0 0 10px 0;white-space:nowrap;font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#222D5A;">' . number_format($iva, 2, ',', '.') . ' €</td></tr>';
@@ -1458,8 +1466,8 @@ function silversea_email_template( $quote_id, $data, $products_html, $shipping_h
     /* Preheader (texto oculto de vista previa en la bandeja de entrada) */
     $preheader = 'Su presupuesto #' . $quote_id
                . ( $subtotal !== null && $subtotal > 0
-                    ? ' · Total ' . number_format($subtotal * (1 + $iva_rate), 2, ',', '.') . ' € IVA incluido · Precio garantizado hasta el ' . $validity_date
-                    : ' · Resumen de su solicitud' );
+                    ? ' · Precios + IVA · Total ' . number_format($subtotal * (1 + $iva_rate), 2, ',', '.') . ' € IVA incluido · Precio garantizado hasta el ' . $validity_date
+                    : ' · Resumen de su solicitud' . ( $show_prices ? ' · Precios + IVA' : '' ) );
 
     $o  = '<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"></head>';
     $o .= '<body style="margin:0;padding:0;background-color:#EFEFEF;">';
@@ -1487,12 +1495,15 @@ function silversea_email_template( $quote_id, $data, $products_html, $shipping_h
     $o .= '<div style="font-family:Arial,Helvetica,sans-serif;font-size:15px;color:#222D5A;line-height:22px;">Hola <strong>' . $name . '</strong>,</div>';
     $o .= '<div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#222D5A;line-height:21px;padding-top:12px;">'
        .  'Gracias por contactar con SILVERSEA Containers. A continuación le enviamos el resumen de su solicitud'
-       .  ( $show_prices ? ' y una estimación de precios para que tenga una referencia clara.' : '.' ) . '</div>';
+       .  ( $show_prices ? ' y una estimación de precios para que tenga una referencia clara. <strong>Todos los precios indicados son + IVA.</strong>' : '.' ) . '</div>';
     $o .= '</td></tr>';
 
     /* ── Resumen de su solicitud ── */
     $o .= '<tr><td style="padding:26px 28px 0 28px;">';
     $o .= '<div style="font-family:Arial,Helvetica,sans-serif;font-size:11px;font-weight:700;letter-spacing:2px;color:#5A6478;padding-bottom:10px;border-bottom:2px solid #222D5A;">RESUMEN DE SU SOLICITUD</div>';
+    if ( $show_prices ) {
+        $o .= '<div style="font-family:Arial,Helvetica,sans-serif;font-size:12px;font-weight:700;color:#222D5A;background-color:#FFF8E1;padding:8px 12px;margin-top:10px;">Todos los precios indicados son + IVA (21%).</div>';
+    }
     $o .= '<table role="presentation" width="100%" cellpadding="0" cellspacing="0">' . $quote_rows . '</table>';
     $o .= $totals_html;
     if ( $pending_note ) {
@@ -1599,7 +1610,7 @@ function silversea_email_template( $quote_id, $data, $products_html, $shipping_h
     $o .= 'Tel: (+34) 935 958 800 · <a href="https://silverseacontainers.com/es/" style="color:#1676BB;">silverseacontainers.com</a> · <a href="https://www.linkedin.com/company/silversea-containers/" style="color:#1676BB;">LinkedIn</a>';
     $o .= '</td></tr><tr><td colspan="2" style="padding-top:12px;border-top:1px solid #DDDDDD;font-size:11px;color:#8A93A6;">';
     $o .= '<span style="display:block;padding-top:8px;">SILVERSEA S.L.U. · CIF B67110601 · Inscrita en el Registro Mercantil de Barcelona. '
-       .  'Este presupuesto no constituye una reserva. <a href="https://www.silverseacontainers.com/terminos" style="color:#8A93A6;">Términos y Condiciones</a></span>';
+       .  ( $show_prices ? 'Todos los precios indicados son + IVA. ' : '' ) . 'Este presupuesto no constituye una reserva. <a href="https://www.silverseacontainers.com/terminos" style="color:#8A93A6;">Términos y Condiciones</a></span>';
     $o .= '</td></tr></table>';
     $o .= '</td></tr>';
 
