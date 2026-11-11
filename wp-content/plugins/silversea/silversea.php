@@ -889,9 +889,6 @@ function lcs_enviar_lead_a_salesforce($request) {
 		'headers' => ['Content-Type' => 'application/x-www-form-urlencoded'],
 	]);
 
-	error_log( 'Salesforce Data: ' . print_r( $salesforce_data, true ) );
-	error_log( 'Salesforce Response: ' . print_r( $response, true ) );
-
 	if (is_wp_error($response)) {
 		return new WP_Error('salesforce_error', 'Error al enviar a Salesforce', ['status' => 500]);
 	}
