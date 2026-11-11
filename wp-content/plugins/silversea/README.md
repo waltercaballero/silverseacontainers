@@ -26,6 +26,7 @@ Plugin WordPress personalizado para Silversea Containers. Integra un cotizador d
 18. [Flujo completo del usuario](#flujo-completo-del-usuario)
 19. [Modo demo](#modo-demo)
 20. [FTP / Despliegue](#ftp--despliegue)
+21. [Tests](#tests)
 
 ---
 
@@ -256,13 +257,33 @@ Capacidad por camión: **4 unidades**
 - Contenedor 20' = 2 unidades
 - Contenedor 10' = 1 unidad
 
-Los 40' siempre van solos. Los 20' y 10' se combinan hasta llenar cada camión.
+- Los **40'** siempre van solos (un camión cada uno).
+- Los **20'** se combinan entre sí hasta llenar el camión (máx. 2).
+- Los **10'** **nunca se mezclan con otro tamaño**: un 10' junto a un 20' o un 40' va en camión aparte. Los 10' van en camiones propios, hasta 4 por camión (nuevos y usados juntos).
+- Orden de la lista = orden de cobro: **40' → 20' → 10'**. En pedidos mixtos, el camión 1 (con grúa) es el del contenedor de mayor tamaño y los 10' van en camiones siguientes. (Reglas confirmadas con Operaciones, nov-2026; motivo: presupuesto #8782, que cotizó un 10' y un 20' en un solo camión.)
 
 ### Reglas de precio (con descarga)
 
-- **Camión 1:** se cobra por contenedor individual (`p_c20` o `p_c40`). Si el camión está lleno (4u) sin 40', se aplica tarifa equivalente a 40'.
-- **Camiones 2+:** se cobra `p_sin + p_extra_truck`.
+- **Camión 1:**
+  - Camión de **solo 10'**: se cobra **una vez por camión**, no por contenedor: 1-2 unidades = tarifa 20' (`p_c20`); 3-4 unidades = tarifa 40' (`p_c40`).
+  - Resto: por contenedor individual (`p_c20` o `p_c40`). Si el camión está lleno (4u) sin 40', se aplica tarifa equivalente a 40'.
+- **Camiones 2+:** se cobra `p_sin + p_extra_truck`, **sin importar la carga** (el escalón de los 10' aplica solo al camión 1). Si el CP no tiene tarifa sin descarga (`p_sin = 0`), el camión se cobra con su propia tarifa con descarga (los camiones de solo 10' usan los mismos escalones).
+- Sin descarga: `p_sin` por camión; la tabla de tarifas tiene un único precio sin descarga, así que no distingue 1-2 de 3-4 unidades.
 - Si `descarga_modo = camion`: todos los camiones al precio sin descarga.
+
+**Un solo lugar para la regla:** `silversea_build_truck_list()` / `silversea_build_truck_breakdown()` (`shipping-quote-calc.php`) las usan el cotizador consolidado, el de un solo producto (`silversea_shipping_ajax_calc`, `shipping-calculator.php`) y el cálculo guardado al enviar el presupuesto. **No hay copia de la lógica en JS**: `shipping-calculator.js` solo pide el cálculo al servidor (también en modo demo; el servidor usa los precios de demo del panel). Si cambia la regla, se cambia únicamente en `shipping-quote-calc.php` y se corren los tests (`php tests/run.php`).
+
+**Tamaño del producto:** el cálculo lee el atributo `pa_tamano` (padre si es variación); si no existe, intenta un 10/20/40 en el título; si tampoco, **asume 20'** (`silversea_get_product_size_info()` informa el origen). Como ese caso hace salir mal el envío en silencio, el listado de productos tiene la columna **Tamaño de envío** (atributo · por título · ⚠ no detectado) y un aviso en el listado de productos y en el panel Cotizador cuando hay productos sin tamaño detectable (`includes/shipping-size-audit.php`).
+
+Ejemplos con tarifas demo (`p_sin` 786,60 · `p_c20` 1.644 · `p_c40` 1.765,28 · extra 1.350), con descarga:
+
+| Pedido | Camiones | Total |
+|---|---|---|
+| 2×10' | 1 | 1.644,00 |
+| 3×10' | 1 | 1.765,28 |
+| 5×10' | 2 (4+1) | 3.901,88 |
+| 20' + 10' | 2 | 3.780,60 |
+| 3×20' + 10' | 3 | 6.038,48 |
 
 ### Estimación de días
 
@@ -566,7 +587,7 @@ Botón en la cabecera de **Cotizador → Configuración**. Descarga un CSV con l
 Activar en: Cotizador → Configuración → ☑ Modo demo
 
 En modo demo:
-- No consulta la BD de tarifas, usa los precios configurados
+- No consulta la BD de tarifas, usa los precios configurados (el cálculo lo hace igual el servidor, tanto en la ficha de producto como en la selección; los desgloses llevan la marca `(DEMO)` y el plazo es 5 días)
 - El destino se muestra como `"CP XXXXX (DEMO)"`
 - Todos los emails se envían a `silversea_admin_email`
 - **No se envían leads a Salesforce** automáticamente (el panel marca la cotización como "No enviado (demo)"). El botón "Enviar a Salesforce" del panel sí funciona manualmente.
@@ -591,7 +612,8 @@ Todos los CSS/JS se encolan con la constante **`SILVERSEA_VERSION`** (definida e
 | `silversea.php` | Bootstrap, banderas, form Salesforce de Elementor |
 | `cotizador.php` | Shortcodes, menús Precios/Ordenar, columna SKU, color gallery (PHP) |
 | `includes/shipping-calculator.php` | Widget PHP, AJAX, menú admin, exportación, `SILVERSEA_VERSION` |
-| `includes/shipping-quote-calc.php` | Lógica de cálculo, helpers de ciudades |
+| `includes/shipping-quote-calc.php` | Lógica de cálculo (camiones y precios), helpers de ciudades, detección del tamaño |
+| `includes/shipping-size-audit.php` | Columna "Tamaño de envío" y aviso de productos sin tamaño detectable |
 | `includes/shipping-session.php` | Sesión, CPT, emails |
 | `includes/shipping-quote-pages.php` | Shortcodes página selección |
 | `includes/salesforce.php` | Integración Salesforce completa |
@@ -602,6 +624,10 @@ Todos los CSS/JS se encolan con la constante **`SILVERSEA_VERSION`** (definida e
 | `assets/css/silversea-raq.css` | Estilos página selección |
 
 > Después de subir cambios en JS o CSS, limpiar caché de WP (WP Rocket, etc.).
+>
+> `assets/js/scripts.js` (captura de UTM sitewide) no usa `SILVERSEA_VERSION`: su versión es la fecha de modificación del archivo, así que se actualiza sola al subirlo.
+>
+> **No subir la carpeta `tests/`** al servidor (es solo para correr en la máquina de desarrollo).
 
 ### Checklist antes de poner en producción
 
@@ -610,3 +636,29 @@ Todos los CSS/JS se encolan con la constante **`SILVERSEA_VERSION`** (definida e
 - [ ] Cotizador → Salesforce: todos los productos mapeados
 - [ ] Cotizador → Ciudades: modos delivery/pickup configurados correctamente
 - [ ] Tarifas importadas para todas las ciudades de entrega
+
+---
+
+## Tests
+
+Tests que corren el **código real** del plugin desde la línea de comandos, sin WordPress ni base de datos (`tests/bootstrap.php` define stubs mínimos de WP/WooCommerce):
+
+```bash
+php tests/run.php
+```
+
+Sale con código 1 si algún test falla. Hace falta PHP en la máquina de desarrollo (en Laragon: `C:\laragon\bin\php\...`). **No subir `tests/` al servidor.**
+
+Qué cubre — las reglas que ya causaron un problema real en producción:
+
+| Sección | Protege |
+|---|---|
+| 1. Camiones | Reglas de carga y precio: 40' solos, 20' entre sí, **10' nunca mezclados** con otro tamaño (hasta 4 por camión), escalón con descarga de los 10' (1-2 u = tarifa 20', 3-4 u = tarifa 40'), camión 1 con grúa = el de mayor tamaño. Incluye el caso del presupuesto #8782 (20' + 10'). |
+| 2. Un solo producto | La ficha de producto cotiza igual que el cálculo compartido (81 combinaciones), más no_tarifa / precio a confirmar / CP inválido y el modo demo. |
+| 3. Tamaño del producto | Origen del tamaño (atributo / título / defecto) y el aviso y la columna del admin. |
+| 4. Firma del carrito | Detección de reenvíos duplicados del formulario. |
+| 5. Salesforce | Picklists restringidos: Customer Type (`Company`/`Individual`), Container Type (`40' Refeer`, `40' HC Open Side,`), Grade (`New`/`Cargo Worthy`) y el resto del payload. Un valor que no coincide hace que Salesforce descarte el lead entero. |
+
+**Al cambiar una regla de negocio:** actualizar primero el valor esperado en `tests/run.php` (es la especificación) y después el código. Los tests se verificaron rompiendo la regla a propósito (p. ej. volver a mezclar 10' con 20' hace fallar 20 tests).
+
+**Agregar un test:** usar `ss_reset()` para limpiar el estado, `ss_product()` para crear productos falsos, `ss_call_ajax()` para ejecutar un handler AJAX, y `check()` / `same()` para verificar.

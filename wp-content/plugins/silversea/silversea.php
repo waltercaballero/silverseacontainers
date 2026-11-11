@@ -223,7 +223,11 @@ function lcs_enqueue_flag_dropdown_assets() {
 
     wp_enqueue_style('flags-dropdown-style', $css_path, [], '1.0.0');
 
-    wp_enqueue_script('flags-dropdown-script', $js_path, ['jquery'], '1.0.0', true);
+    /* Versión = fecha de modificación del archivo: cada vez que se sube un scripts.js nuevo,
+       los navegadores lo vuelven a bajar. Con '1.0.0' fijo, los visitantes con el archivo
+       cacheado no recibían los cambios (p. ej. la captura de UTM sitewide que vive acá). */
+    $js_ver = @filemtime( plugin_dir_path(__FILE__) . 'assets/js/scripts.js' ) ?: '1.0.0';
+    wp_enqueue_script('flags-dropdown-script', $js_path, ['jquery'], $js_ver, true);
 }
 add_action('wp_enqueue_scripts', 'lcs_enqueue_flag_dropdown_assets');
 

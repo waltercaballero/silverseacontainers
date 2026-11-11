@@ -202,38 +202,64 @@ function silversea_origin_label( $origin ) {
 }
 
 /**
- * Detecta el tamaño (pies) de un producto WooCommerce.
- * Prioridad: taxonomía pa_tamano → padre si es variación → título del producto.
+ * Detecta el tamaño (pies) de un producto WooCommerce y de dónde salió el dato.
+ * Prioridad: taxonomía pa_tamano → padre si es variación → título del producto → 20 por defecto.
+ *
+ * El tamaño decide cuántas unidades ocupa en el camión y, con eso, cuántos camiones se
+ * cobran. Cuando no se puede detectar se asume 20' EN SILENCIO — por eso se informa el origen:
+ * el panel de admin avisa de los productos en ese caso (ver shipping-size-audit.php).
+ *
+ * @return array ['size' => int, 'source' => 'attribute'|'title'|'default']
+ *   attribute = viene del atributo pa_tamano (dato confiable)
+ *   title     = inferido de un 10/20/40 en el título (heurística)
+ *   default   = NO se pudo detectar: se cotiza como 20'
  */
-function silversea_get_product_size( WC_Product $product ) {
+function silversea_get_product_size_info( WC_Product $product ) {
     $terms = wc_get_product_terms( $product->get_id(), 'pa_tamano', ['fields' => 'slugs'] );
     if ( empty( $terms ) && $product->is_type('variation') ) {
         $terms = wc_get_product_terms( $product->get_parent_id(), 'pa_tamano', ['fields' => 'slugs'] );
     }
     if ( ! empty( $terms ) && preg_match( '/(\d+)/', $terms[0], $m ) ) {
-        return (int) $m[1];
+        return [ 'size' => (int) $m[1], 'source' => 'attribute' ];
     }
     if ( preg_match( '/\b(10|20|40)\b/', $product->get_title(), $m2 ) ) {
-        return (int) $m2[1];
+        return [ 'size' => (int) $m2[1], 'source' => 'title' ];
     }
-    return 20; // default
+    return [ 'size' => 20, 'source' => 'default' ];
+}
+
+/** Tamaño (pies) de un producto. Ver silversea_get_product_size_info() para el origen del dato. */
+function silversea_get_product_size( WC_Product $product ) {
+    $info = silversea_get_product_size_info( $product );
+    return $info['size'];
 }
 
 /**
  * Construye la lista óptima de camiones dado un array de items_detail.
- * Regla: camión = 4 unidades (40'=4u, 20'=2u, 10'=1u).
- * Los 40' van solos. Los 20' y 10' se combinan hasta llenar cada camión.
+ * Capacidad por camión = 4 unidades (40'=4u, 20'=2u, 10'=1u).
+ *
+ * Reglas de carga (confirmadas con Operaciones):
+ *  - Los 40' van solos, un camión cada uno.
+ *  - Los 20' se combinan entre sí hasta llenar el camión (máx. 2).
+ *  - Los 10' NUNCA se mezclan con otro tamaño: van en camiones propios, hasta 4
+ *    por camión (nuevos y usados juntos). Un 10' junto a un 20' o un 40' => camión aparte.
+ *
+ * Orden de la lista = orden de cobro: 40', luego 20', luego 10'. El camión 1 es el que
+ * lleva la grúa (con descarga), así que en pedidos mixtos lo lleva el contenedor
+ * de mayor tamaño y los 10' van en camiones siguientes.
  */
 function silversea_build_truck_list( $items_detail ) {
     $containers_40 = [];
-    $remaining     = [];
+    $containers_20 = []; /* todo lo que no es 10' ni 40' (en la práctica, 20') */
+    $containers_10 = [];
 
     foreach ( $items_detail as $item ) {
         $units = intdiv( $item['size'], 10 );
         for ( $i = 0; $i < $item['quantity']; $i++ ) {
             $c = [ 'name' => $item['name'], 'size' => $item['size'], 'units' => $units ];
-            if ( $item['size'] === 40 ) $containers_40[] = $c;
-            else                        $remaining[]      = $c;
+            if ( $item['size'] === 40 )      $containers_40[] = $c;
+            elseif ( $item['size'] === 10 )  $containers_10[] = $c;
+            else                             $containers_20[] = $c;
         }
     }
 
@@ -243,10 +269,23 @@ function silversea_build_truck_list( $items_detail ) {
         $trucks[] = [ 'containers' => [ ['name' => $c['name'], 'size' => 40, 'qty' => 1] ], 'units' => 4 ];
     }
 
+    return array_merge(
+        $trucks,
+        silversea_pack_trucks( $containers_20 ),
+        silversea_pack_trucks( $containers_10 )
+    );
+}
+
+/**
+ * Empaqueta contenedores de un mismo grupo en camiones de hasta 4 unidades.
+ * Cada camión: ['containers' => [...consolidado], 'units' => int].
+ */
+function silversea_pack_trucks( $containers ) {
+    $trucks        = [];
     $current       = [];
     $current_units = 0;
 
-    foreach ( $remaining as $c ) {
+    foreach ( $containers as $c ) {
         if ( $current_units + $c['units'] <= 4 ) {
             $current[]      = $c;
             $current_units += $c['units'];
@@ -273,12 +312,46 @@ function silversea_consolidate_truck( $containers ) {
     return array_values( $map );
 }
 
+/** ¿El camión lleva únicamente contenedores de 10'? */
+function silversea_truck_is_only_10( $truck ) {
+    if ( empty( $truck['containers'] ) ) return false;
+    foreach ( $truck['containers'] as $c ) {
+        if ( $c['size'] !== 10 ) return false;
+    }
+    return true;
+}
+
+/**
+ * Sufijo de etiqueta cuando el camión se cobra "como" otro tamaño.
+ * Camión de solo 10': 1-2 unidades = tarifa 20', 3-4 = tarifa 40'.
+ * Camión lleno (4u) sin 40' = tarifa 40'.
+ */
+function silversea_truck_equiv_label( $truck ) {
+    $units  = $truck['units'] ?? 0;
+    if ( silversea_truck_is_only_10( $truck ) ) {
+        return $units >= 3 ? ' [equiv. 40ft]' : ' [equiv. 20ft]';
+    }
+    $has_40 = false;
+    foreach ( $truck['containers'] as $c ) {
+        if ( $c['size'] === 40 ) { $has_40 = true; break; }
+    }
+    return ( ! $has_40 && $units >= 4 ) ? ' [equiv. 40ft]' : '';
+}
+
 /**
  * Precio con descarga para un camión.
- * Camión lleno sin 40' (4 unidades de ≤20') → tarifa equivalente 40'.
+ *  - Camión de solo 10': se cobra UNA vez por camión (no por contenedor):
+ *    1-2 unidades → tarifa 20' (p_c20); 3-4 unidades → tarifa 40' (p_c40).
+ *  - Camión lleno sin 40' (4 unidades de ≤20') → tarifa equivalente 40'.
+ *  - Resto: por contenedor (p_c20 o p_c40).
  */
 function silversea_calc_truck_con_descarga( $truck, $p_c20, $p_c40 ) {
     $units  = $truck['units'] ?? 0;
+
+    if ( silversea_truck_is_only_10( $truck ) ) {
+        return $units >= 3 ? $p_c40 : $p_c20;
+    }
+
     $has_40 = false;
     foreach ( $truck['containers'] as $c ) {
         if ( $c['size'] === 40 ) { $has_40 = true; break; }
@@ -322,10 +395,7 @@ function silversea_build_truck_breakdown( $truck_list, $transport, $descarga_mod
             $lbl = silversea_truck_label($truck);
             if ( $idx === 0 ) {
                 $price       = silversea_calc_truck_con_descarga( $truck, $p_c20, $p_c40 );
-                $units       = $truck['units'] ?? 0;
-                $has_40      = false;
-                foreach ( $truck['containers'] as $_c ) { if ( $_c['size'] === 40 ) { $has_40 = true; break; } }
-                $extra_label = ( ! $has_40 && $units >= 4 ) ? ' [equiv. 40ft]' : '';
+                $extra_label = silversea_truck_equiv_label( $truck );
                 $breakdown[] = [ 'label' => "Camión 1 (con grúa): {$lbl}{$extra_label}{$demo_tag}", 'price' => $price ];
             } else {
                 /* Si el CP no tiene tarifa sin descarga, usar precio con descarga sin el recargo extra. */

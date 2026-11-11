@@ -3,6 +3,7 @@
 /* Cotizador */
 
 require_once plugin_dir_path( __FILE__ ) . 'includes/shipping-calculator.php';
+require_once plugin_dir_path( __FILE__ ) . 'includes/shipping-size-audit.php';
 
 /**
  * Usado en el listado de productos, para mostrar el total de resultados

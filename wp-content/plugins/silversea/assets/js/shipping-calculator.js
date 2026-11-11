@@ -88,14 +88,8 @@ function scT(key, fallback) {
   }
 
   var productSize = typeof silvSea !== "undefined" && silvSea.productSize ? silvSea.productSize : "20";
-  var demoMode = typeof silvSea !== "undefined" && silvSea.demoMode === "1";
-  var descargaModo = typeof silvSea !== "undefined" && silvSea.descargaModo ? silvSea.descargaModo : "contenedor";
-  var demoPriceSin = typeof silvSea !== "undefined" ? (parseFloat(silvSea.demoPriceSin) || 786.60) : 786.60;
-  var demoPriceC20 = typeof silvSea !== "undefined" ? (parseFloat(silvSea.demoPriceC20) || 1644.00) : 1644.00;
-  var demoPriceC40 = typeof silvSea !== "undefined" ? (parseFloat(silvSea.demoPriceC40) || 1765.28) : 1765.28;
   var isConsolidated = typeof silvSea !== "undefined" && silvSea.mode === "consolidated";
   var showFront = typeof silvSea !== "undefined" && silvSea.showFront === "1";
-  var cartItems = typeof silvSea !== "undefined" && silvSea.items ? silvSea.items : [];
 
   var currentMethod = "pickup";
   var currentTransport = "sin";
@@ -281,134 +275,6 @@ function scT(key, fallback) {
     document.dispatchEvent(new CustomEvent("silversea:shipping:saved", { detail: d }));
   };
 
-  /*  LÓGICA DE CAMIONES  */
-  function scBuildTruckList(qty, size) {
-    var trucks = []; var remaining = [];
-    for (var i = 0; i < qty; i++) {
-      if (size === 40) trucks.push({ containers: [{ size: 40, qty: 1 }], units: 4 });
-      else remaining.push({ size: size, units: size / 10 });
-    }
-    var current = []; var currentUnits = 0;
-    remaining.forEach(function (c) {
-      if (currentUnits + c.units <= 4) { current.push(c); currentUnits += c.units; }
-      else { if (current.length > 0) trucks.push({ containers: scConsolidateTruck(current), units: currentUnits }); current = [c]; currentUnits = c.units; }
-    });
-    if (current.length > 0) trucks.push({ containers: scConsolidateTruck(current), units: currentUnits });
-    return trucks;
-  }
-
-  function scConsolidateTruck(containers) {
-    var map = {};
-    containers.forEach(function (c) { var key = c.size; if (map[key]) map[key].qty++; else map[key] = { size: c.size, qty: 1 }; });
-    return Object.values(map);
-  }
-
-  /*  BUILD RESULT — SINGLE  */
-  function scBuildResult(qty, size, transport, pSin, pCon, cp) {
-    var useTrucks = transport === "sin" || descargaModo === "camion";
-    var truckList = scBuildTruckList(qty, size);
-    var breakdown = []; var total = 0;
-    var pExtraTruck = typeof silvSea !== "undefined" ? (parseFloat(silvSea.extraTruckCost) || 1350.00) : 1350.00;
-    if (useTrucks) {
-      truckList.forEach(function (truck, idx) {
-        var label = "Cami\u00f3n " + (idx + 1) + ": " + truck.containers.map(function (c) { return c.qty + "\u00d7" + c.size + "'"; }).join(" + ");
-        breakdown.push({ label: label, price: pSin }); total += pSin;
-      });
-    } else {
-      truckList.forEach(function (truck, idx) {
-        if (idx === 0) {
-          /* Camión 1 — con grúa. Regla: ≤20' llenando el camión (4u) = tarifa 40' */
-          var truckUnits = truck.units || 0;
-          var has40 = truck.containers.some(function(c) { return c.size === 40; });
-          if (!has40 && truckUnits >= 4) {
-            /* Camión lleno sin 40': cobrar como equiv. 40' */
-            breakdown.push({ label: "Camión 1 (con grúa) – " + truck.containers.map(function(c){return c.qty+"×"+c.size+"'";}).join(" + ") + " [equiv. 40']", price: demoPriceC40 });
-            total += demoPriceC40;
-          } else {
-            truck.containers.forEach(function (c) {
-              var p = c.size === 40 ? demoPriceC40 : pCon;
-              for (var i = 1; i <= c.qty; i++) { breakdown.push({ label: "Camión 1 (con grúa) – Contenedor (" + c.size + "')", price: p }); total += p; }
-            });
-          }
-        } else {
-          /* Camiones extra — sin grúa: pSin + extra */
-          var priceExtra = pSin + pExtraTruck;
-          var lbl = truck.containers.map(function (c) { return c.qty + "\u00d7" + c.size + "'"; }).join(" + ");
-          breakdown.push({ label: "Cami\u00f3n " + (idx + 1) + " (sin gr\u00faa + extra): " + lbl, price: priceExtra });
-          total += priceExtra;
-        }
-      });
-    }
-    var trucks = truckList.length;
-    var transp_label = transport === "sin" ? "sin descarga" : "con descarga";
-    var detail = qty + "\u00d7" + size + "' \u00b7 " + transp_label + " \u00b7 Municipio Demo a CP " + cp + (trucks > 1 ? " \u00b7 " + trucks + " camiones" : "");
-    return { price: parseFloat(total.toFixed(2)), detail: detail, breakdown: breakdown, trucks: trucks, days: 3 };
-  }
-
-  /*  BUILD RESULT — CONSOLIDADO  */
-  function scBuildResultConsolidated(items, transport, cp) {
-    var allContainers = [];
-    items.forEach(function (item) {
-      for (var i = 0; i < item.quantity; i++) {
-        if (item.size === 40) allContainers.push({ size: 40, units: 4, name: item.name, is40: true });
-        else allContainers.push({ size: item.size, units: item.size / 10, name: item.name, is40: false });
-      }
-    });
-    var trucks = []; var remaining = [];
-    allContainers.forEach(function (c) {
-      if (c.is40) trucks.push({ containers: [{ size: 40, qty: 1, name: c.name }], units: 4 });
-      else remaining.push(c);
-    });
-    var current = []; var currentUnits = 0;
-    remaining.forEach(function (c) {
-      if (currentUnits + c.units <= 4) { current.push(c); currentUnits += c.units; }
-      else { if (current.length > 0) trucks.push({ containers: scConsolidateNamedTruck(current), units: currentUnits }); current = [c]; currentUnits = c.units; }
-    });
-    if (current.length > 0) trucks.push({ containers: scConsolidateNamedTruck(current), units: currentUnits });
-    var useTrucks = transport === "sin" || descargaModo === "camion";
-    var pExtraTruck = typeof silvSea !== "undefined" ? (parseFloat(silvSea.extraTruckCost) || 1350.00) : 1350.00;
-    var breakdown = []; var total = 0;
-    if (useTrucks) {
-      trucks.forEach(function (truck, idx) {
-        var label = "Cami\u00f3n " + (idx + 1) + ": " + truck.containers.map(function (c) { return c.qty + "\u00d7" + c.size + "'"; }).join(" + ") + " (DEMO)";
-        breakdown.push({ label: label, price: demoPriceSin }); total += demoPriceSin;
-      });
-    } else {
-      trucks.forEach(function (truck, idx) {
-        if (idx === 0) {
-          /* Camión 1 — con grúa. Regla: ≤20' llenando el camión (4u) = tarifa 40' */
-          var truckUnits = truck.units || 0;
-          var has40 = truck.containers.some(function(c) { return c.size === 40; });
-          if (!has40 && truckUnits >= 4) {
-            breakdown.push({ label: "Camión 1 (con grúa) – " + truck.containers.map(function(c){return c.qty+"×"+c.size+"'";}).join(" + ") + " [equiv. 40'] (DEMO)", price: demoPriceC40 });
-            total += demoPriceC40;
-          } else {
-            truck.containers.forEach(function (c) {
-              var p = c.size === 40 ? demoPriceC40 : demoPriceC20;
-              for (var i = 1; i <= c.qty; i++) { breakdown.push({ label: "Camión 1 (con grúa) – " + c.size + "' (DEMO)", price: p }); total += p; }
-            });
-          }
-        } else {
-          /* Camiones extra — sin grúa: demoPriceSin + extra */
-          var priceExtra = demoPriceSin + pExtraTruck;
-          var lbl = truck.containers.map(function (c) { return c.qty + "\u00d7" + c.size + "'"; }).join(" + ");
-          breakdown.push({ label: "Cami\u00f3n " + (idx + 1) + " (sin gr\u00faa + extra): " + lbl + " (DEMO)", price: priceExtra });
-          total += priceExtra;
-        }
-      });
-    }
-    var numTrucks = trucks.length;
-    var transp_label = transport === "sin" ? "sin descarga" : "con descarga";
-    var detail = "Selecci\u00f3n completa \u00b7 " + transp_label + " \u00b7 CP " + cp + (numTrucks > 1 ? " \u00b7 " + numTrucks + " camiones" : "");
-    return { price: parseFloat(total.toFixed(2)), detail: detail, breakdown: breakdown, trucks: numTrucks, days: 3 };
-  }
-
-  function scConsolidateNamedTruck(containers) {
-    var map = {};
-    containers.forEach(function (c) { var key = c.size + "_" + c.name; if (map[key]) map[key].qty++; else map[key] = { size: c.size, name: c.name, qty: 1 }; });
-    return Object.values(map);
-  }
-
   /*  VALIDACIÓN  */
   function scValidate() {
     var origin = document.getElementById("scOriginCity").value;
@@ -538,23 +404,9 @@ function scT(key, fallback) {
     scClearResult(); if (!scValidate()) return;
     document.getElementById("scLoaderArea").classList.remove("sc-hidden");
     document.getElementById("scCalcBtn").disabled = true;
-    /* Demo consolidado */
-    if (demoMode && isConsolidated) {
-      setTimeout(function () {
-        var cp = document.getElementById("scPostalCode").value;
-        scShowResult(scBuildResultConsolidated(cartItems, currentTransport, cp));
-      }, 600); return;
-    }
-    /* Demo single */
-    if (demoMode) {
-      setTimeout(function () {
-        var qty = scGetQty(); var size = parseInt(productSize);
-        var pCon = size === 40 ? demoPriceC40 : demoPriceC20;
-        var cp = document.getElementById("scPostalCode").value;
-        scShowResult(scBuildResult(qty, size, currentTransport, demoPriceSin, pCon, cp));
-      }, 600); return;
-    }
-    /* Real consolidado */
+    /* El cálculo SIEMPRE lo hace el servidor, también en modo demo (el servidor usa los
+       precios de demo del panel admin). No hay copia de la lógica de camiones en JS. */
+    /* Consolidado */
     if (isConsolidated) {
       var payload = {
         action: "silversea_calc_consolidated", nonce: typeof silvSea !== "undefined" ? silvSea.nonce : "",
@@ -567,7 +419,7 @@ function scT(key, fallback) {
       scSendCalc(ajaxUrl2, fd2);
       return;
     }
-    /* Real single */
+    /* Single */
     var payload = {
       action: "silversea_calc_shipping", nonce: typeof silvSea !== "undefined" ? silvSea.nonce : "",
       method: "delivery", product_size: productSize, quantity: scGetQty(), transport: currentTransport,

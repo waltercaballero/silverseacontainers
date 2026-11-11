@@ -16,7 +16,7 @@ if ( ! defined( 'SILVERSEA_PLUGIN_DIR' ) )
 /* Versión única para cache-busting de todos los assets (JS/CSS).
    Subir este número cuando se modifique cualquier archivo de assets. */
 if ( ! defined( 'SILVERSEA_VERSION' ) )
-    define( 'SILVERSEA_VERSION', '2.3.3' );
+    define( 'SILVERSEA_VERSION', '2.3.4' );
 
 require_once __DIR__ . '/texts.php';
 
@@ -1224,13 +1224,7 @@ function silversea_shipping_shortcode( $atts = [] ) {
         'productSize'  => $product_size,
         'sizeLabel'    => $size_label,
         'mode'         => $mode,
-        'items'        => $items_summary,
-        'demoMode'     => get_option('silversea_demo_mode',     '0'),
-        'descargaModo' => get_option('silversea_descarga_modo', 'contenedor'),
-        'demoPriceSin' => (float)get_option('silversea_demo_price_sin', '786.60'),
-        'demoPriceC20' => (float)get_option('silversea_demo_price_c20', '1644.00'),
-        'demoPriceC40'    => (float)get_option('silversea_demo_price_c40', '1765.28'),
-        'extraTruckCost'  => (float)get_option('silversea_extra_truck_cost', '1350.00'),
+        /* Sin datos de demo/precios/camiones: el cálculo es 100% del servidor (no hay espejo en JS). */
         'showFront'        => get_option('silversea_show_front', '0'),
         'requireQuote'     => get_option('silversea_require_quote', '0'),
         'showProductPrice' => get_option('silversea_show_product_price', '0'),
@@ -1397,17 +1391,29 @@ function silversea_shipping_ajax_calc() {
     $origin       = sanitize_key($_POST['origin']??'');
     $cp           = silversea_normalize_cp($_POST['postal_code']??'');
     $product_size = in_array((string)($_POST['product_size']??''),['10','20','40'])?(int)$_POST['product_size']:20;
-    $quantity     = max(1,(int)($_POST['quantity']??1));
+    /* Tope: el cálculo recorre una vez por contenedor (silversea_build_truck_list) y este endpoint es
+       público (nopriv). Sin tope, quantity=100000000 agotaría memoria/CPU del servidor. */
+    $quantity     = min( 1000, max(1,(int)($_POST['quantity']??1)) );
 
     if (!in_array($origin, silversea_get_city_keys('delivery'), true)) wp_send_json_error(['message'=>'Ciudad de origen inválida.']);
     if (!$cp) wp_send_json_error(['message'=>'Código postal inválido. Debe tener 5 dígitos.']);
 
-    global $wpdb; $table=$wpdb->prefix.'silversea_tarifas';
-    $row=silversea_find_tarifa_row($origin,$cp);
-    if (!$row) wp_send_json_success(['no_tarifa'=>true,'cp'=>$cp,'origin'=>$origin,'product_size'=>$product_size,'quantity'=>$quantity]);
+    $is_demo = get_option('silversea_demo_mode', '0') === '1';
+    if ($is_demo) {
+        /* Modo demo: precios del panel admin, sin consultar la tabla de tarifas (igual que
+           silversea_calc_consolidated_demo). Antes lo calculaba una copia de la lógica en JS. */
+        $row = [
+            'precio_sin_descarga' => (float)get_option('silversea_demo_price_sin', '786.60'),
+            'precio_con_desc_20'  => (float)get_option('silversea_demo_price_c20', '1644.00'),
+            'precio_con_desc_40'  => (float)get_option('silversea_demo_price_c40', '1765.28'),
+            'municipio_destino'   => "CP {$cp} (DEMO)",
+            'km'                  => 0,
+        ];
+    } else {
+        $row=silversea_find_tarifa_row($origin,$cp);
+        if (!$row) wp_send_json_success(['no_tarifa'=>true,'cp'=>$cp,'origin'=>$origin,'product_size'=>$product_size,'quantity'=>$quantity]);
+    }
 
-    $units_per=$product_size===10?1:($product_size===20?2:4);
-    $trucks=(int)ceil(($units_per*$quantity)/4);
     $descarga_modo=get_option('silversea_descarga_modo','contenedor');
     $p_sin=(float)$row['precio_sin_descarga']; $p_c20=(float)$row['precio_con_desc_20']; $p_c40=(float)$row['precio_con_desc_40'];
 
@@ -1418,50 +1424,27 @@ function silversea_shipping_ajax_calc() {
             'detail'=>"{$quantity}×{$product_size}' · con descarga · {$destino} · desde ".silversea_origin_label($origin)]);
     }
 
-    $breakdown=[]; $total=0.0;
-
-    if ($transp==='sin'||$descarga_modo==='camion') {
-        $total=$p_sin*$trucks;
-        for($i=1;$i<=$trucks;$i++) $breakdown[]=['label'=>"Camión {$i} ({$product_size}')",'price'=>$p_sin];
-    } else {
-        /* Camión 1: con descarga (lleva grúa). Camiones 2+: sin descarga + extra */
-        $p_extra_truck = (float)get_option('silversea_extra_truck_cost', '1350.00');
-        for ( $i = 1; $i <= $trucks; $i++ ) {
-            if ( $i === 1 ) {
-                /* Camión 1 con grúa — regla: ≤20' lleno (4 unidades) = tarifa 40' */
-                $units_in_truck      = min( $units_per * $quantity, 4 );
-                $containers_in_truck = (int)ceil( $units_in_truck / $units_per );
-                if ( $product_size !== 40 && $units_in_truck >= 4 ) {
-                    $price_truck = $p_c40;
-                    $breakdown[] = ['label' => "Camión 1 — con grúa ({$containers_in_truck}×{$product_size}' equiv. 40')", 'price' => $price_truck];
-                } else {
-                    $p_unit      = $product_size === 40 ? $p_c40 : $p_c20;
-                    $price_truck = $p_unit * $containers_in_truck;
-                    $breakdown[] = ['label' => "Camión 1 — con grúa ({$containers_in_truck}×{$product_size}')", 'price' => $price_truck];
-                }
-                $total += $price_truck;
-            } else {
-                /* Camiones extra — sin descarga + costo extra.
-                   Si el CP no tiene tarifa sin descarga, usar el precio con descarga sin el recargo extra. */
-                if ( $p_sin > 0.0 ) {
-                    $price_truck = $p_sin + $p_extra_truck;
-                    $breakdown[] = ['label' => "Camión {$i} — sin grúa + servicio extra", 'price' => $price_truck];
-                } else {
-                    $p_unit      = $product_size === 40 ? $p_c40 : $p_c20;
-                    $price_truck = $p_unit;
-                    $breakdown[] = ['label' => "Camión {$i} — con descarga (alternativa)", 'price' => $price_truck];
-                }
-                $total += $price_truck;
-            }
-        }
-    }
+    /* Camiones y precios: MISMAS funciones que el cotizador consolidado
+       (shipping-quote-calc.php), para que la regla de carga y de precio
+       (incluida la de los 10') viva en un solo lugar. */
+    $truck_list    = silversea_build_truck_list( [[
+        'name'     => "{$product_size}'",
+        'size'     => $product_size,
+        'quantity' => $quantity,
+        'units'    => intdiv( $product_size, 10 ) * $quantity,
+    ]] );
+    $trucks        = count( $truck_list );
+    $p_extra_truck = (float)get_option('silversea_extra_truck_cost', '1350.00');
+    $result        = silversea_build_truck_breakdown( $truck_list, $transp, $descarga_modo, $p_sin, $p_c20, $p_c40, $p_extra_truck, $is_demo );
+    $breakdown     = $result['breakdown'];
+    $total         = $result['total'];
 
     $transp_label=$transp==='sin'?'sin descarga':'con descarga';
     $destino=$row['municipio_destino']?:"CP {$cp}";
     $detail_parts=["{$quantity}×{$product_size}'",$transp_label,$destino,'desde ' . silversea_origin_label($origin)];
     if (($transp==='sin'||$descarga_modo==='camion')&&$trucks>1) $detail_parts[]="{$trucks} camiones";
 
-    wp_send_json_success(['price'=>round($total,2),'detail'=>implode(' · ',$detail_parts),'breakdown'=>$breakdown,'trucks'=>$trucks,'days'=>silversea_shipping_estimate_days((int)$row['km']),'km'=>(int)$row['km']]);
+    wp_send_json_success(['price'=>round($total,2),'detail'=>implode(' · ',$detail_parts),'breakdown'=>$breakdown,'trucks'=>$trucks,'days'=>$is_demo?5:silversea_shipping_estimate_days((int)$row['km']),'km'=>(int)$row['km']]);
 }
 
 function silversea_shipping_estimate_days($km) {
